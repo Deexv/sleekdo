@@ -12,6 +12,9 @@ export interface CommandResult {
 
 export class CommandEngine {
   private readonly defaultCwd: string;
+  /** Simple cache for tool-call results. Keyed by (command, args, cwd). */
+  private commandCache = new Map<string, CommandResult>();
+  private cacheSize = 100;
 
   constructor(defaultCwd: string) {
     this.defaultCwd = defaultCwd;
@@ -30,6 +33,13 @@ export class CommandEngine {
     const cwd = options?.cwd || this.defaultCwd;
     const timeoutMs = options?.timeoutMs || 30000;
     const startTime = Date.now();
+
+    // Check cache before running command
+    const cacheKey = `${command}:${JSON.stringify(args)}:${cwd}`;
+    const cached = this.commandCache.get(cacheKey);
+    if (cached) {
+      return Promise.resolve(cached);
+    }
 
     return new Promise((resolve) => {
       let stdout = '';
@@ -66,7 +76,7 @@ export class CommandEngine {
 
       child.on('close', (code) => {
         clearTimeout(timer);
-        resolve({
+        const result = {
           command,
           args,
           exitCode: code ?? (timedOut ? -1 : 0),
@@ -74,12 +84,19 @@ export class CommandEngine {
           stderr,
           durationMs: Date.now() - startTime,
           timedOut,
-        });
+        };
+        // Cache the result (evict if over size limit)
+        this.commandCache.set(cacheKey, result);
+        if (this.commandCache.size > this.cacheSize) {
+          const firstKey = this.commandCache.keys().next().value;
+          this.commandCache.delete(firstKey!);
+        }
+        resolve(result);
       });
 
       child.on('error', (err) => {
         clearTimeout(timer);
-        resolve({
+        const result = {
           command,
           args,
           exitCode: -1,
@@ -87,8 +104,25 @@ export class CommandEngine {
           stderr: err.message,
           durationMs: Date.now() - startTime,
           timedOut,
-        });
+        };
+        // Cache the result (evict if over size limit)
+        this.commandCache.set(cacheKey, result);
+        if (this.commandCache.size > this.cacheSize) {
+          const firstKey = this.commandCache.keys().next().value;
+          this.commandCache.delete(firstKey!);
+        }
+        resolve(result);
       });
     });
+  }
+
+  /** Clear the command cache. Useful when the workspace changes. */
+  public clearCache(): void {
+    this.commandCache.clear();
+  }
+
+  /** Get current cache size (for debugging). */
+  public getCacheSize(): number {
+    return this.commandCache.size;
   }
 }
