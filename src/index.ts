@@ -28,3 +28,5 @@ export * from './analysis/dead-file-analyzer.js';
 export * from './analysis/dependency-analyzer.js';
 export * from './validation/schemas.js';
 export * from './config/config.js';
+export * from './cli/interactive-cli.js';
+export * from './cli/cli.js';

@@ -2852,3 +2852,142 @@ The final conceptual architecture is:
 ## Final governing principle
 
 **A1 should never be trusted to decide what the project needs next, A2 should never be trusted to declare its own plan correct, A3 should never be trusted merely because it is a reviewer, and no AI should be trusted merely because it claims something happened; Sleekdo must continuously turn requirements into authorized work, work into observable evidence, evidence into independently verified results, and verified results back into global planning until the entire system reaches a demonstrably complete state.**
+
+# 97. Sleekdo-native CLI
+
+
+There are two good interface models:
+
+1. **Sleekdo-native CLI — recommended**
+
+   ```bash
+   sleekdo --pi
+   sleekdo --agy
+   sleekdo --claude
+   ```
+
+   This launches Sleekdo's own interactive terminal UI. Sleekdo asks for the project/request, displays progress, task state, reviews, errors, etc., while internally launching and controlling the selected agent CLI.
+
+2. **Sleekdo with an explicit provider**
+
+   ```bash
+   sleekdo pi
+   sleekdo agy
+   sleekdo claude
+   ```
+
+   Same concept, just a cleaner subcommand architecture.
+
+I would **not** make the third model—where you have to do something like `echo "build X" | sleekdo --pi` or manually send prompts through the underlying CLI—the primary interface.
+
+### Recommended UX
+
+```text
+$ sleekdo --pi
+
+╭──────────────────────────────────────────────╮
+│ SLEEKDO                                      │
+│ Agent: Pi                                    │
+│ Project: my-project                          │
+╰──────────────────────────────────────────────╯
+
+What do you want to build?
+
+> Build a complete inventory system with authentication,
+  persistence, tests, and an admin interface.
+
+Sleekdo is planning...
+
+✓ Requirements extracted
+✓ Initial plan created
+✓ Plan independently reviewed
+
+Tasks
+  ✓ T001 Project architecture
+  → T002 Authentication
+  ○ T003 Database layer
+  ○ T004 Inventory system
+  ○ T005 Admin interface
+  ○ T006 Integration & verification
+
+A1 Worker: Pi
+A3 Reviewer: active
+
+T002 Authentication
+  Worker: implementing...
+  Tests: running...
+  Review: pending...
+
+[██████████████░░░░░░░░] 58%
+
+sleekdo>
+```
+
+The important distinction is that **Pi/Agy/Claude are execution backends**, while **Sleekdo owns the user-facing session**.
+
+So the architecture should be:
+
+```text
+                 YOU
+                  │
+                  ▼
+        ┌─────────────────┐
+        │  Sleekdo CLI/UI │
+        │  User Interface │
+        └────────┬────────┘
+                 │
+        ┌────────▼────────┐
+        │ A2 Orchestrator │
+        │ Planning/State  │
+        └───────┬─────────┘
+                │
+       ┌────────┴────────┐
+       ▼                 ▼
+   ┌───────┐         ┌───────┐
+   │  A1   │         │  A3   │
+   │ Worker│         │Review │
+   │  Pi   │         │ Fresh │
+   └───────┘         └───────┘
+```
+
+### Commands I'd specify in the PRD
+
+```bash
+sleekdo --pi
+sleekdo --agy
+sleekdo --claude
+```
+
+and optionally:
+
+```bash
+sleekdo --provider pi
+sleekdo --provider agy
+sleekdo --provider claude
+```
+
+Then inside the Sleekdo interface:
+
+```text
+sleekdo> build a complete inventory system
+```
+
+or simply launch directly into the request screen.
+
+Sleekdo should also support normal CLI commands **inside its own interface**, for example:
+
+```text
+sleekdo> status
+sleekdo> tasks
+sleekdo> pause
+sleekdo> resume
+sleekdo> review T004
+sleekdo> logs
+sleekdo> retry T004
+sleekdo> plan
+sleekdo> exit
+```
+
+That gives you **one consistent interface regardless of whether the underlying worker is Pi, Agy, Claude Code, or another future CLI**.
+
+I would therefore make **“Sleekdo owns the interactive CLI; agent CLIs are headless/controlled backends” a hard architectural requirement in the PRD.**

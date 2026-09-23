@@ -40,7 +40,25 @@ npm link
 sleekdo --help
 ```
 
-### Basic workflow
+### Native interactive mode (Section 97)
+
+Per PRD Section 97, Sleekdo provides an interactive terminal session where Sleekdo owns the user-facing UI while controlling external agent CLIs as headless backends:
+
+```bash
+# Launch with Pi CLI backend
+sleekdo --pi
+sleekdo pi
+
+# Launch with Google Antigravity backend
+sleekdo --agy
+sleekdo agy
+
+# Launch with Claude Code backend
+sleekdo --claude
+sleekdo claude
+```
+
+### Basic batch workflow
 
 1. Initialize a new project with your objective:
 
@@ -85,7 +103,7 @@ Deep architectural guides, adapter integrations, and requirements traceability r
 - **[Connecting CLI agents](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/docs/CLI_AGENT_GUIDE.md).** Step-by-step setup for Pi CLI, Claude Code, Google Antigravity (Agy), Python scripts, shell wrappers, argument templates, and mixed per-role setups.
 - **[CLI reference](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/docs/CLI_REFERENCE.md).** Complete reference for every CLI command, flag, and runtime option.
 - **[Architecture and subsystems](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/docs/ARCHITECTURE.md).** Detailed reference covering the storage layer, orchestrator, state machine, evidence engines, investigation system, and AST analyzers.
-- **[PRD section traceability](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/docs/PRD_TRACEABILITY.md).** Individual section-by-section breakdown mapping all 96 PRD sections to source files, invariants, and automated verification tests.
+- **[PRD section traceability](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/docs/PRD_TRACEABILITY.md).** Individual section-by-section breakdown mapping all 97 PRD sections to source files, invariants, and automated verification tests.
 
 ## Running tests
 

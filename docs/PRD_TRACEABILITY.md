@@ -635,3 +635,13 @@ This document maps all 96 sections of the Product Requirements Document to their
 - **Implementation.** [`index.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/index.ts), [`cli.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/cli/cli.ts).
 - **Invariants.** The complete system runs from clean CLI interface or programmatic TypeScript API.
 - **Verification.** All automated unit, integration, and live E2E suites pass cleanly.
+
+---
+
+## Part 16: Native terminal interface (Section 97)
+
+### Section 97. Sleekdo-native CLI
+- **Requirement.** Sleekdo owns the user-facing interactive terminal session. Agent CLIs (Pi, Agy, Claude Code) operate as controlled, headless execution backends. Provide native flags (`sleekdo --pi`, `sleekdo --agy`, `sleekdo --claude`), subcommands (`sleekdo pi`, `sleekdo agy`, `sleekdo claude`), provider options (`--provider <name>`), boxed header, live task status updates, progress bar, and interactive command loop (`build`, `status`, `tasks`, `run`, `pause`, `resume`, `review`, `retry`, `plan`, `logs`, `clean`, `verify`, `exit`).
+- **Implementation.** [`interactive-cli.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/cli/interactive-cli.ts), [`cli.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/cli/cli.ts), [`orchestrator.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/core/orchestrator.ts).
+- **Invariants.** Sleekdo maintains session ownership. Coding agents never control session lifecycle, review validation, or state transitions.
+- **Verification.** Verified in unit tests [`section97-native-cli.test.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/test/unit/section97-native-cli.test.ts) covering flag parsing, UI box rendering, progress bars, and all interactive commands.

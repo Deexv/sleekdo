@@ -5,6 +5,7 @@ import { GenericPTYAdapter } from '../adapters/generic-pty-adapter.js';
 import type { AgentAdapter } from '../adapters/agent-adapter.js';
 import { loadConfig, type SleekdoConfig } from '../config/config.js';
 import { StateStore } from '../storage/state-store.js';
+import { InteractiveCliSession } from './interactive-cli.js';
 
 function createAdapter(type: 'pi' | 'mock' | 'generic', config: SleekdoConfig): AgentAdapter {
   if (type === 'mock') {
@@ -16,11 +17,90 @@ function createAdapter(type: 'pi' | 'mock' | 'generic', config: SleekdoConfig): 
   }
 }
 
+export function resolveProvider(
+  firstArg: string | undefined,
+  secondArg: string | undefined,
+  config: SleekdoConfig
+): { isInteractive: boolean; providerName: string; adapter: AgentAdapter } | null {
+  if (!firstArg || firstArg === '--interactive' || firstArg === 'interactive') {
+    const norm = config.defaultAdapter;
+    const adapter = createAdapter(norm, config);
+    const name = norm === 'pi' ? 'Pi' : norm === 'generic' ? 'Generic CLI' : 'Mock';
+    return { isInteractive: true, providerName: name, adapter };
+  }
+
+  const lower = firstArg.toLowerCase();
+  if (lower === '--pi' || lower === 'pi') {
+    return { isInteractive: true, providerName: 'Pi', adapter: new PiAdapter(config.piCliPath) };
+  }
+  if (lower === '--agy' || lower === 'agy') {
+    return {
+      isInteractive: true,
+      providerName: 'Antigravity (Agy)',
+      adapter: new GenericPTYAdapter('agy', ['run', '--prompt', '{prompt}']),
+    };
+  }
+  if (lower === '--claude' || lower === 'claude') {
+    return {
+      isInteractive: true,
+      providerName: 'Claude Code',
+      adapter: new GenericPTYAdapter('claude', ['-p', '{prompt}', '--dangerously-skip-permissions']),
+    };
+  }
+  if (lower === '--provider' && secondArg) {
+    const prov = secondArg.toLowerCase();
+    if (prov === 'pi') {
+      return { isInteractive: true, providerName: 'Pi', adapter: new PiAdapter(config.piCliPath) };
+    }
+    if (prov === 'agy') {
+      return {
+        isInteractive: true,
+        providerName: 'Antigravity (Agy)',
+        adapter: new GenericPTYAdapter('agy', ['run', '--prompt', '{prompt}']),
+      };
+    }
+    if (prov === 'claude') {
+      return {
+        isInteractive: true,
+        providerName: 'Claude Code',
+        adapter: new GenericPTYAdapter('claude', ['-p', '{prompt}', '--dangerously-skip-permissions']),
+      };
+    }
+    if (prov === 'mock') {
+      return { isInteractive: true, providerName: 'Mock', adapter: new MockAdapter() };
+    }
+    return {
+      isInteractive: true,
+      providerName: secondArg,
+      adapter: new GenericPTYAdapter(secondArg, ['-p', '{prompt}']),
+    };
+  }
+
+  return null;
+}
+
 export async function runCli(args: string[]): Promise<void> {
-  const command = args[0] || 'status';
   const workspaceDir = process.cwd();
   const config = loadConfig(workspaceDir);
 
+  // Check for Section 97 Sleekdo-native CLI interactive flags
+  const providerResolution = resolveProvider(args[0], args[1], config);
+  if (providerResolution && providerResolution.isInteractive) {
+    const session = new InteractiveCliSession({
+      workspaceDir,
+      agentName: providerResolution.providerName,
+      workerAdapter: providerResolution.adapter,
+      plannerAdapter: config.plannerAdapter ? createAdapter(config.plannerAdapter, config) : providerResolution.adapter,
+      reviewerAdapter: config.reviewerAdapter ? createAdapter(config.reviewerAdapter, config) : providerResolution.adapter,
+      testCommand: config.testCommand,
+      testArgs: config.testArgs,
+      maxConsecutiveRejections: config.maxConsecutiveRejections,
+    });
+    await session.start();
+    return;
+  }
+
+  const command = args[0] || 'status';
   const defaultAdapter = createAdapter(config.defaultAdapter, config);
   const workerAdapter = config.workerAdapter ? createAdapter(config.workerAdapter, config) : defaultAdapter;
   const plannerAdapter = config.plannerAdapter ? createAdapter(config.plannerAdapter, config) : defaultAdapter;
@@ -219,6 +299,6 @@ export async function runCli(args: string[]): Promise<void> {
     }
 
     default:
-      console.log('Usage: sleekdo [init|run|status|verify|clean|inspect|pause|resume|clarify|replan|override]');
+      console.log('Usage: sleekdo [--pi|--agy|--claude|pi|agy|claude|init|run|status|verify|clean|inspect|pause|resume|clarify|replan|override]');
   }
 }

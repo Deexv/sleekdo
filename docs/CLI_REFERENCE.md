@@ -2,7 +2,49 @@
 
 This document provides complete syntax, parameters, and behavior for the `sleekdo` command-line interface.
 
-## Commands
+## Sleekdo-native interactive CLI (Section 97)
+
+Sleekdo owns the user-facing interactive terminal session. Agent CLIs (Pi, Claude Code, Agy) run as controlled, headless execution backends.
+
+```bash
+# Launch interactive session with Pi backend
+sleekdo --pi
+sleekdo pi
+
+# Launch interactive session with Google Antigravity backend
+sleekdo --agy
+sleekdo agy
+
+# Launch interactive session with Claude Code backend
+sleekdo --claude
+sleekdo claude
+
+# Launch with explicit provider
+sleekdo --provider <pi|agy|claude|mock>
+
+# Launch with default configured provider
+sleekdo
+```
+
+### Interactive terminal commands
+
+Inside the Sleekdo interactive prompt (`sleekdo>`), the following commands are available:
+
+- `build <objective>`. Initializes project planning with the specified objective.
+- `run`. Executes or continues the autonomous development cycle until completion.
+- `status`. Displays live status, task counts, requirement progress, and active locks.
+- `tasks`. Displays the task tree with status symbols (`✓` approved, `→` in progress, `○` ready/pending, `✗` rejected/blocked).
+- `plan`. Prints the current plan version, original objective, and requirement breakdown.
+- `pause`. Gracefully pauses the execution loop.
+- `resume`. Resumes paused execution.
+- `review <taskId>`. Inspects the A3 independent review verdict, evidence, and blocking issues for a task.
+- `retry <taskId>`. Resets a rejected or blocked task to `READY` state.
+- `logs`. Displays recent audit events from the event store.
+- `clean`. Runs dead-code, dead-file, and dependency analysis.
+- `verify`. Runs final 13-criteria system verification.
+- `exit` or `quit`. Closes the interactive session.
+
+## Batch subcommands
 
 ### sleekdo init
 

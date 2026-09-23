@@ -22,6 +22,29 @@ import { A2Planner } from '../roles/a2-planner.js';
 import { A3Reviewer } from '../roles/a3-reviewer.js';
 import { Task, TaskId, TaskStatus, ReviewResult, SleekdoState, RequirementId, TaskRejection } from '../types/domain.js';
 
+export interface OrchestratorProgressEvent {
+  phase:
+    | 'planning'
+    | 'plan_created'
+    | 'plan_reviewed'
+    | 'task_start'
+    | 'task_implementing'
+    | 'tests_running'
+    | 'review_pending'
+    | 'task_approved'
+    | 'task_rejected'
+    | 'reassessing'
+    | 'complete'
+    | 'paused'
+    | 'blocked';
+  taskId?: TaskId;
+  taskTitle?: string;
+  message?: string;
+  progressPercent?: number;
+}
+
+export type OrchestratorProgressCallback = (event: OrchestratorProgressEvent) => void;
+
 export interface OrchestratorOptions {
   workspaceDir: string;
   workerAdapter: AgentAdapter;
@@ -31,6 +54,7 @@ export interface OrchestratorOptions {
   testCommand?: string;
   testArgs?: string[];
   maxIterations?: number;
+  onProgress?: OrchestratorProgressCallback;
 }
 
 export class Orchestrator {
@@ -94,6 +118,27 @@ export class Orchestrator {
     this.worker = new A1Worker(workerAdapter, this.workspaceDir);
     this.planner = new A2Planner(plannerAdapter, this.workspaceDir);
     this.reviewer = new A3Reviewer(reviewerAdapter, this.workspaceDir);
+    this.onProgress = options.onProgress;
+  }
+
+  public onProgress?: OrchestratorProgressCallback;
+
+  public calculateProgressPercent(): number {
+    const state = this.stateStore.getState();
+    const tasks = Object.values(state.tasks);
+    if (tasks.length === 0) return 0;
+    const approved = tasks.filter((t) => t.status === 'APPROVED').length;
+    return Math.round((approved / tasks.length) * 100);
+  }
+
+  public notifyProgress(event: OrchestratorProgressEvent): void {
+    if (this.onProgress) {
+      try {
+        this.onProgress(event);
+      } catch {
+        // non-fatal progress listener error
+      }
+    }
   }
 
   public async initialize(userRequest: string): Promise<void> {
@@ -126,8 +171,11 @@ export class Orchestrator {
       { request: userRequest }
     );
 
+    this.notifyProgress({ phase: 'planning', message: 'Sleekdo is planning...' });
+
     // 2. A2 creates initial plan
     const initialPlan = await this.planner.createInitialPlan(userRequest);
+    this.notifyProgress({ phase: 'plan_created', message: 'Initial plan created' });
     this.eventStore.appendEvent(
       this.stateStore.getRevision(),
       'PLAN_CREATED',
@@ -209,6 +257,8 @@ export class Orchestrator {
         },
       ];
     });
+
+    this.notifyProgress({ phase: 'plan_reviewed', message: 'Plan independently reviewed' });
   }
 
   public async handleRequirementChange(newRequest: string): Promise<boolean> {
@@ -415,6 +465,12 @@ export class Orchestrator {
             finalVerification as unknown as Record<string, unknown>
           );
 
+          this.notifyProgress({
+            phase: 'complete',
+            progressPercent: 100,
+            message: 'Project successfully completed and fully verified.',
+          });
+
           return true;
         } else {
           // If tasks exist but are blocked or unapproved, pause or fail gracefully
@@ -499,6 +555,9 @@ export class Orchestrator {
       taskId
     );
 
+    this.notifyProgress({ phase: 'task_start', taskId: task.id, taskTitle: task.title });
+    this.notifyProgress({ phase: 'task_implementing', taskId: task.id, taskTitle: task.title, message: 'Worker: implementing...' });
+
     // 2. Capture baseline workspace snapshot
     const baselineSnapshot = this.snapshotEngine.captureSnapshot();
     this.artifactStore.saveSnapshot(baselineSnapshot);
@@ -579,6 +638,7 @@ export class Orchestrator {
       // Collect git diff and test evidence
       const gitDiff = this.gitEngine.getDiff();
       let testSummary: string | undefined;
+      this.notifyProgress({ phase: 'tests_running', taskId: task.id, taskTitle: task.title, message: 'Tests: running...' });
       try {
         const testRes = await this.testEngine.runTests(this.testCommand, this.testArgs);
         testSummary = `Passed: ${testRes.passedTests}/${testRes.totalTests}, Exit: ${testRes.passed ? 0 : 1}`;
@@ -593,6 +653,7 @@ export class Orchestrator {
           TaskStateMachine.transition(t, 'AWAITING_REVIEW', draft.tasks);
         }
       });
+      this.notifyProgress({ phase: 'review_pending', taskId: task.id, taskTitle: task.title, message: 'Review: pending...' });
 
       this.eventStore.appendEvent(
         this.stateStore.getRevision(),
@@ -668,11 +729,25 @@ export class Orchestrator {
       { taskId, summary: review.summary },
       taskId
     );
+
+    this.notifyProgress({
+      phase: 'task_approved',
+      taskId,
+      taskTitle: this.stateStore.getTask(taskId)?.title,
+      progressPercent: this.calculateProgressPercent(),
+    });
   }
 
   private handleTaskRejection(taskId: TaskId, review: ReviewResult): void {
     const count = (this.rejectionCounts.get(taskId) || 0) + 1;
     this.rejectionCounts.set(taskId, count);
+
+    this.notifyProgress({
+      phase: 'task_rejected',
+      taskId,
+      taskTitle: this.stateStore.getTask(taskId)?.title,
+      message: review.summary,
+    });
 
     this.stateStore.updateState((draft) => {
       draft.reviews[review.id] = review;

@@ -13,6 +13,24 @@ Sleekdo supports two primary adapter implementations:
 1. [`PiAdapter`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/adapters/pi-adapter.ts). Tailored integration for Pi CLI with streaming event capture.
 2. [`GenericPTYAdapter`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/adapters/generic-pty-adapter.ts). Universal process adapter supporting Claude Code, Agy, Python scripts, shell scripts, and custom binaries.
 
+## Fast launch commands (Section 97)
+
+Per PRD Section 97, Sleekdo provides instant launcher flags and subcommands that automatically bind the target agent backend:
+
+```bash
+# Pi CLI
+sleekdo --pi
+sleekdo pi
+
+# Google Antigravity (Agy)
+sleekdo --agy
+sleekdo agy
+
+# Claude Code
+sleekdo --claude
+sleekdo claude
+```
+
 ## The prompt placeholder
 
 For commands that accept the prompt as a CLI flag or argument, use `{prompt}` inside the `args` array. Sleekdo replaces `{prompt}` with the structured role prompt at runtime.
