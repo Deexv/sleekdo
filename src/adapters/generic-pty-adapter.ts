@@ -5,10 +5,12 @@ import { AgentAdapter, AgentConfig, AgentEvent, AgentSession } from './agent-ada
 export class GenericPTYAdapter implements AgentAdapter {
   public readonly name = 'GenericPTYAdapter';
   private readonly defaultCommand: string;
+  private readonly defaultArgs: string[];
   private readonly active = new Map<string, { process: ChildProcess; emitter: EventEmitter; completed: boolean }>();
 
-  constructor(defaultCommand = 'node') {
+  constructor(defaultCommand = 'claude', defaultArgs: string[] = ['-p', '{prompt}']) {
     this.defaultCommand = defaultCommand;
+    this.defaultArgs = defaultArgs;
   }
 
   public async start(config: AgentConfig): Promise<AgentSession> {
@@ -25,7 +27,16 @@ export class GenericPTYAdapter implements AgentAdapter {
     const emitter = new EventEmitter();
     const cmd = session.config.model || this.defaultCommand;
 
-    const child = spawn(cmd, [input], {
+    // Substitute prompt template placeholder
+    const hasPlaceholder = this.defaultArgs.some((a) => a.includes('{prompt}'));
+    let args: string[];
+    if (hasPlaceholder) {
+      args = this.defaultArgs.map((arg) => (arg === '{prompt}' ? input : arg.replace('{prompt}', input)));
+    } else {
+      args = [...this.defaultArgs, input];
+    }
+
+    const child = spawn(cmd, args, {
       cwd: session.config.workspaceDir,
       env: { ...process.env, ...session.config.env },
       shell: true,
@@ -41,11 +52,15 @@ export class GenericPTYAdapter implements AgentAdapter {
       data: { sessionId: session.id },
     } as AgentEvent);
 
+    let rawOutput = '';
+
     child.stdout?.on('data', (d) => {
+      const text = d.toString();
+      rawOutput += text;
       emitter.emit('event', {
         type: 'message',
         timestamp: Date.now(),
-        data: { text: d.toString() },
+        data: { text },
       } as AgentEvent);
     });
 
@@ -63,7 +78,7 @@ export class GenericPTYAdapter implements AgentAdapter {
       emitter.emit('event', {
         type: 'turn_completed',
         timestamp: Date.now(),
-        data: { exitCode: code },
+        data: { exitCode: code, rawOutput },
       } as AgentEvent);
       emitter.emit('event', {
         type: 'session_completed',

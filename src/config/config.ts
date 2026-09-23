@@ -4,9 +4,14 @@ import * as path from 'node:path';
 export interface SleekdoConfig {
   workspaceDir: string;
   defaultAdapter: 'pi' | 'mock' | 'generic';
+  genericCliCommand?: string;
+  genericCliArgs?: string[];
   piCliPath?: string;
   piProvider?: string;
   piModel?: string;
+  workerAdapter?: 'pi' | 'mock' | 'generic';
+  plannerAdapter?: 'pi' | 'mock' | 'generic';
+  reviewerAdapter?: 'pi' | 'mock' | 'generic';
   maxConsecutiveRejections: number;
   maxIterations: number;
   testCommand?: string;

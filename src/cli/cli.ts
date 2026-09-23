@@ -1,23 +1,36 @@
 import { Orchestrator } from '../core/orchestrator.js';
 import { PiAdapter } from '../adapters/pi-adapter.js';
 import { MockAdapter } from '../adapters/mock-adapter.js';
-import { loadConfig } from '../config/config.js';
+import { GenericPTYAdapter } from '../adapters/generic-pty-adapter.js';
+import type { AgentAdapter } from '../adapters/agent-adapter.js';
+import { loadConfig, type SleekdoConfig } from '../config/config.js';
 import { StateStore } from '../storage/state-store.js';
+
+function createAdapter(type: 'pi' | 'mock' | 'generic', config: SleekdoConfig): AgentAdapter {
+  if (type === 'mock') {
+    return new MockAdapter();
+  } else if (type === 'generic') {
+    return new GenericPTYAdapter(config.genericCliCommand || 'claude', config.genericCliArgs || ['-p', '{prompt}']);
+  } else {
+    return new PiAdapter(config.piCliPath);
+  }
+}
 
 export async function runCli(args: string[]): Promise<void> {
   const command = args[0] || 'status';
   const workspaceDir = process.cwd();
   const config = loadConfig(workspaceDir);
 
-  const adapter = config.defaultAdapter === 'mock'
-    ? new MockAdapter()
-    : new PiAdapter(config.piCliPath);
+  const defaultAdapter = createAdapter(config.defaultAdapter, config);
+  const workerAdapter = config.workerAdapter ? createAdapter(config.workerAdapter, config) : defaultAdapter;
+  const plannerAdapter = config.plannerAdapter ? createAdapter(config.plannerAdapter, config) : defaultAdapter;
+  const reviewerAdapter = config.reviewerAdapter ? createAdapter(config.reviewerAdapter, config) : defaultAdapter;
 
   const orchestrator = new Orchestrator({
     workspaceDir,
-    workerAdapter: adapter,
-    plannerAdapter: adapter,
-    reviewerAdapter: adapter,
+    workerAdapter,
+    plannerAdapter,
+    reviewerAdapter,
     maxConsecutiveRejections: config.maxConsecutiveRejections,
     testCommand: config.testCommand,
     testArgs: config.testArgs,
