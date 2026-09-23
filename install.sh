@@ -2,16 +2,19 @@
 
 # Sleekdo Installer
 # Downloads and installs Sleekdo to your PATH
+# No secret needed - automatically detects latest release from GitHub
 
 set -e
 
-# Colors for output
-RED='\\033[0;31m'
-GREEN='\\033[0;32m'
-YELLOW='\\033[1;33m'
-NC='\\033[0m' # No Color
+# Get the current tag from GitHub (no secret needed)
+GITHUB_TAG=$(curl -s https://api.github.com/repos/Deexv/sleekdo/releases/latest | grep -oP 'tag_name": "v[^\"]+"' | grep -oP 'v[^\"]+')
 
-echo -e "${GREEN}Installing Sleekdo...${NC}"
+if [[ -z "$GITHUB_TAG" ]]; then
+    echo "Error: Could not determine latest release tag"
+    exit 1
+fi
+
+echo "Installing Sleekdo $GITHUB_TAG..."
 
 # Detect OS and architecture
 OS=""
@@ -25,7 +28,7 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
     OS="windows"
 else
-    echo -e "${RED}Unsupported operating system: $OSTYPE${NC}"
+    echo "Error: Unsupported operating system: $OSTYPE"
     exit 1
 fi
 
@@ -38,7 +41,7 @@ if [[ "$ARCH" == "" ]]; then
             ARCH="arm64"
             ;;
         *)
-            echo -e "${RED}Unsupported architecture: $(uname -m)${NC}"
+            echo "Error: Unsupported architecture: $(uname -m)"
             exit 1
             ;;
     esac
@@ -63,8 +66,8 @@ if [[ "$OS" == "windows" ]]; then
     DOWNLOAD_URL="https://github.com/Deexv/sleekdo/releases/download/${GITHUB_TAG}/sleekdo-${OS}-x64.zip"
 fi
 
-echo -e "${YELLOW}Detected: ${OS} ${ARCH}${NC}"
-echo -e "${YELLOW}Downloading from: $DOWNLOAD_URL${NC}"
+echo "Detected: $OS $ARCH"
+echo "Downloading from: $DOWNLOAD_URL"
 
 # Download
 TEMP_DIR=$(mktemp -d)
@@ -79,13 +82,13 @@ fi
 # Verify download
 if [[ "$OS" == "windows" ]]; then
     if [[ ! -f "$TEMP_DIR/sleekdo.exe" ]]; then
-        echo -e "${RED}Download failed${NC}"
+        echo "Error: Download failed"
         exit 1
     fi
     chmod +x "$TEMP_DIR/sleekdo.exe"
 else
     if [[ ! -f "$TEMP_DIR/sleekdo" ]]; then
-        echo -e "${RED}Download failed${NC}"
+        echo "Error: Download failed"
         exit 1
     fi
     chmod +x "$TEMP_DIR/sleekdo"
@@ -118,7 +121,7 @@ if [[ "$OS" == "windows" ]]; then
     CURRENT_PATH=$(powershell -Command "[Environment]::GetEnvironmentVariable('Path', 'User')")
     if [[ ":$CURRENT_PATH:" != *":$INSTALL_DIR:"* ]]; then
         powershell -Command "[Environment]::SetEnvironmentVariable('Path', '$CURRENT_PATH;$INSTALL_DIR', 'User')"
-        echo -e "${YELLOW}Added $INSTALL_DIR to PATH${NC}"
+        echo "Added $INSTALL_DIR to PATH"
     fi
 else
     # Add to PATH for Unix-like systems
@@ -133,33 +136,30 @@ else
         fi
 
         if [[ -n "$SHELL_RC" ]]; then
-            echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
-            echo -e "${YELLOW}Added $INSTALL_DIR to PATH in $SHELL_RC${NC}"
+            echo "export PATH=\"$INSTALL_DIR:$PATH\"" >> "$SHELL_RC"
+            echo "Added $INSTALL_DIR to PATH in $SHELL_RC"
         else
-            echo -e "${RED}Could not find shell config file. Please add $INSTALL_DIR to your PATH manually.${NC}"
+            echo "Warning: Could not find shell config file. Please add $INSTALL_DIR to your PATH manually."
         fi
     fi
 fi
 
-echo -e "${GREEN}✓ Installed sleekdo to $INSTALL_DIR${NC}"
-
-# Verify installation
 if [[ "$OS" == "windows" ]]; then
     if command -v sleekdo.exe &> /dev/null; then
-        echo -e "${GREEN}✓ sleekdo is now available in your PATH${NC}"
+        echo "✓ sleekdo is now available in your PATH"
     else
-        echo -e "${YELLOW}Note: You may need to restart your terminal for PATH changes to take effect${NC}"
+        echo "Note: You may need to restart your terminal for PATH changes to take effect"
     fi
 else
     if command -v sleekdo &> /dev/null; then
-        echo -e "${GREEN}✓ sleekdo is now available in your PATH${NC}"
+        echo "✓ sleekdo is now available in your PATH"
     else
-        echo -e "${YELLOW}Note: You may need to restart your terminal for PATH changes to take effect${NC}"
+        echo "Note: You may need to restart your terminal for PATH changes to take effect"
     fi
 fi
 
 echo ""
-echo -e "${GREEN}Sleekdo installed successfully!${NC}"
+echo "Sleekdo $GITHUB_TAG installed successfully!"
 echo ""
 echo "To use Sleekdo:"
 echo "  sleekdo --help"

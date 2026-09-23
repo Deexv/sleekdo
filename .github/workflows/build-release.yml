@@ -54,13 +54,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          if [[ "${{ runner.os }}" == "macOS" ]]; then
-            # macOS uses gzip directly
-            tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
-          else
-            # Linux uses gzip
-            tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
-          fi
+          tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
           sha256sum dist/${{ matrix.name }}.tar.gz > dist/${{ matrix.name }}.tar.gz.sha256
 
       - name: Create zip (Windows)

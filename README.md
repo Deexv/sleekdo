@@ -1,102 +1,77 @@
 # Sleekdo
 
-Sleekdo is an agent orchestration and verification system. It enables coding CLI agents to autonomously build, modify, debug, test, refactor, and complete software projects of arbitrary size and domain.
-
-Sleekdo sits above coding CLI agents. Compatible agents include Pi, Claude Code, Antigravity (Agy), and arbitrary command line agents. Sleekdo does not replace the coding agent. It controls the development lifecycle around the coding agent.
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://badge.fury.io/js/sleekdo.svg)](https://badge.fury.io/js/sleekdo)
 [![GitHub Actions](https://github.com/Deexv/sleekdo/workflows/Build%20and%20Release/badge.svg)](https://github.com/Deexv/sleekdo/actions)
 
-## Architectural model
+**Sleekdo is an agent orchestration and verification system for autonomous software development.** It enables coding CLI agents to build, modify, debug, test, refactor, and complete software projects of arbitrary size and domain.
 
-Sleekdo organizes work around three logical AI roles coordinated by an authoritative orchestrator:
+## Features
 
-- **A1 Worker.** Executes implementation, coding, test writing, and bug fixing tasks.
-- **A2 Planner.** Understands the user objective, decomposes it into dependency ordered work, continuously reassesses progress, discovers newly required tasks, and maintains the global roadmap.
-- **A3 Reviewer.** Independently verifies completed work in a fresh, isolated session using direct observable evidence from the workspace.
+- **Batch-review model** — Tasks are executed first, then reviewed in a single end-of-run batch with synthetic per-task reviews
+- **Command cache** — Memoizes tool-call results to reduce redundant operations and improve performance
+- **Live agent streaming** — Tool calls, markdown-formatted narration, and idle loaders in real-time
+- **Progress tracking** — Executed-but-unreviewed tasks count toward progress so the bar reflects real work
+- **Design/anti-AI-slop review** — Explicit checks for emoji-stuffed headers, lorem ipsum, generic gradients
+- **Raw-mode input** — Claude Code-style always-closed input box with history and tab completion
+- **Zero-repository-clone installer** — Install with a single command without cloning the repository
 
-The central invariant governs all operations. A1 performs work. A2 determines what work must exist. A3 independently determines whether completed work is correct. The Sleekdo orchestrator controls what work proceeds. No agent approves its own output. No agent skips validation gates.
+## Installation
 
-## Installation on a new computer
-
-### Quick install
-
-**Recommended for most users:**
+### Quick Install (Recommended)
 
 ```bash
 npm install -g sleekdo
 ```
 
-**Zero-repository-clone installer:**
+### Alternative: Zero-Repository-Clone Installer
 
 ```bash
-curl -fsSL https://sleekdo.dev/install.sh | sh
+curl -fsSL https://github.com/Deexv/sleekdo/raw/main/install.sh | sh
 ```
 
-Both install Sleekdo globally to your PATH and verify the installation. The `curl` installer detects your OS/architecture, downloads the appropriate binary, and adds it to PATH.
+This installer automatically detects your OS and architecture (Linux x64, Linux arm64, macOS arm64, macOS x64, Windows x64), downloads the appropriate binary from GitHub Releases, and adds it to your PATH.
 
-### Prerequisites
-
-Ensure you have Node.js 18 or higher, npm, and git installed.
-
-Install at least one coding agent backend globally on your computer:
-
-- **Pi CLI (recommended):**
-  ```bash
-  npm install -g @earendil-works/pi-coding-agent
-  ```
-  Configure your model provider in Pi before running Sleekdo.
-
-- **Claude Code:**
-  ```bash
-  npm install -g @anthropic-ai/claude-code
-  export ANTHROPIC_API_KEY="your-api-key"
-  ```
-
-- **Google Antigravity (Agy):**
-  Install the `agy` CLI binary and ensure it is available in your PATH.
-
-### Verify installation
+### Linux Installation
 
 ```bash
+# Using npm
+npm install -g sleekdo
+
+# Or using curl
+curl -fsSL https://github.com/Deexv/sleekdo/raw/main/install.sh | sh
+
+# Verify installation
 sleekdo --help
 ```
 
-### Development install
-
-For contributors, clone the repository and build locally:
+### macOS Installation
 
 ```bash
-git clone https://github.com/Deexv/sleekdo.git
-cd sleekdo
-npm install
-npm run build
-npm link
-```
+# Using npm
+npm install -g sleekdo
 
-Verify the local install:
+# Or using curl
+curl -fsSL https://github.com/Deexv/sleekdo/raw/main/install.sh | sh
 
-```bash
+# Verify installation
 sleekdo --help
 ```
 
----
+### Windows Installation
 
-## How to use Sleekdo on a new project
+```powershell
+# Using npm
+npm install -g sleekdo
 
-### 1. Create a project directory
-
-Navigate to any directory where you want to build software:
-
-```bash
-mkdir my-new-project
-cd my-new-project
+# Or using PowerShell
+Invoke-WebRequest -Uri "https://github.com/Deexv/sleekdo/raw/main/install.ps1" -OutFile "install.ps1"
+.\install.ps1
 ```
 
-### 2. Launch with your chosen agent backend
+## Usage
 
-Launch the native interactive terminal UI with your installed agent:
+### Start the Interactive Terminal
 
 ```bash
 # With Pi CLI backend (recommended)
@@ -105,48 +80,44 @@ sleekdo --pi
 # With Claude Code backend
 sleekdo --claude
 
-# With Google Antigravity backend
+# With Google Antigravity (Agy) backend
 sleekdo --agy
 ```
 
-### 3. Enter your objective
+### Enter Your Objective
 
 Type what you want to build when prompted:
 
-```text
-╭──────────────────────────────────────────────╮
-│  SLEEKDO                                     │
-│  Agent: Pi                                   │
-│  Project: my-new-project                     │
-╰──────────────────────────────────────────────╯
-
-What do you want to build?
-
+```
 > Create a complete REST API with authentication, SQLite storage, tests, and rate limiting.
 ```
 
 Sleekdo plans the work, validates the plan with A3 Reviewer, and displays the task roadmap.
 
-### 4. Interactive session commands
+### Interactive Commands
 
-Inside the interactive prompt (`sleekdo>`), run these commands:
+Inside the interactive prompt (`sleekdo>`), use these commands:
 
-- `run`. Starts the autonomous implementation and verification cycle.
-- `status`. Prints active state, requirement coverage, and blocked tasks.
-- `tasks`. Prints the current task breakdown with status symbols (`✓`, `→`, `○`, `✗`).
-- `plan`. Prints the decomposed plan and criteria.
-- `review <taskId>`. Shows the A3 review verdict and evidence for a specific task.
-- `retry <taskId>`. Resets a task to `READY` to retry execution.
-- `pause`. Pauses execution gracefully at task boundaries.
-- `resume`. Resumes paused execution.
-- `logs`. Displays recent audit events.
-- `exit` or `quit`. Closes the interactive terminal.
-- `/lockin`. Lock in the current objective and skip the A3 plan review for faster refinement.
-- `/lockin <objective>`. Update the objective and skip the A3 plan review.
+| Command | Action |
+|---------|--------|
+| `run` | Starts the autonomous implementation and verification cycle |
+| `status` | Displays live status, task counts, requirement progress, and blocked tasks |
+| `tasks` | Displays the task tree with status symbols (`✓` approved, `→` in progress, `○` ready/pending, `✗` rejected/blocked) |
+| `plan` | Prints the current plan version, original objective, and requirement breakdown |
+| `review <taskId>` | Shows the A3 review verdict and evidence for a specific task |
+| `retry <taskId>` | Resets a rejected or blocked task to `READY` state |
+| `pause` | Gracefully pauses execution after current task boundary |
+| `resume` | Resumes paused execution |
+| `logs` | Displays recent audit events |
+| `clean` | Runs dead-code, dead-file, and dependency analysis |
+| `verify` | Runs final 13-criteria system verification |
+| `/lockin` | Lock in the current objective and skip A3 plan review for faster refinement |
+| `/lockin <objective>` | Update the objective and skip A3 plan review |
+| `exit` or `quit` | Closes the interactive session |
 
-### 5. Alternative: Batch mode workflow
+### Batch Mode Workflow
 
-For headless scripting, run standard subcommands directly:
+For headless scripting:
 
 ```bash
 # Initialize project with your prompt
@@ -162,53 +133,78 @@ sleekdo status
 sleekdo verify
 ```
 
-## CLI summary
+## Architecture
 
-The table below summarizes the primary CLI commands. For complete flag definitions and behaviors, see the [CLI reference guide](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/docs/CLI_REFERENCE.md).
+Sleekdo organizes work around three logical AI roles coordinated by an authoritative orchestrator:
 
-| Command | Action |
-| --- | --- |
-| `sleekdo --pi` | Start interactive terminal with Pi CLI backend |
-| `sleekdo --claude` | Start interactive terminal with Claude Code backend |
-| `sleekdo --agy` | Start interactive terminal with Antigravity backend |
-| `sleekdo init <objective>` | Initializes project storage and records primary objective |
-| `sleekdo run` | Executes the recursive autonomous development lifecycle |
-| `sleekdo status` | Prints state, requirement matrix, tasks, and active leases |
-| `sleekdo verify` | Runs system verification across tests, git state, and dead code |
-| `sleekdo clean` | Scans for unreferenced code, dead files, and unused dependencies |
-| `sleekdo replan` | Forces A2 Planner to perform a global project reassessment |
-| `sleekdo pause` | Gracefully pauses execution after current task boundary |
-| `sleekdo resume` | Resumes execution from persisted state |
-| `sleekdo override <id> <verdict>` | Overrides review verdict with audit logging |
-| `sleekdo clarify <id> <answer>` | Answers an agent clarification question |
-| `sleekdo inspect <taskId>` | Prints full diagnostic details for a specific task |
-| `/lockin` | Lock in the current objective and skip A3 plan review |
-| `/lockin <objective>` | Update objective and skip A3 plan review |
-| `/lockin <objective> --continue` | Update objective, skip A3 review, and continue running |
-| `/lockin <objective> --continue --resume` | Update objective, skip A3 review, resume from paused state |
-| `exit` / `quit` | Close the interactive terminal |
+### A1 Worker
+
+Executes implementation, coding, test writing, and bug fixing tasks. Receives only authorized task definitions and local scope.
+
+### A2 Planner
+
+Understands the user objective, decomposes it into dependency-ordered tasks, discovers newly required work, and maintains the global roadmap.
+
+### A3 Reviewer
+
+Independently verifies completed work in fresh sessions using observable evidence from the workspace.
+
+### Key Invariants
+
+- A1 performs work
+- A2 determines what work must exist
+- A3 independently determines whether completed work is correct
+- The Sleekdo orchestrator controls what work proceeds
+- No agent approves its own output
+- No agent skips validation gates
 
 ## Documentation
 
-- [Full README](https://github.com/Deexv/sleekdo/blob/main/README.md) — Detailed installation, usage, and architecture
-- [CLI Reference](https://github.com/Deexv/sleekdo/blob/main/docs/CLI_REFERENCE.md) — Complete command reference
-- [Architecture Guide](https://github.com/Deexv/sleekdo/blob/main/docs/ARCHITECTURE.md) — System design and subsystems
+- [Full README](https://github.com/Deexv/sleekdo/blob/main/README.md) - Detailed installation, usage, and architecture
+- [CLI Reference](https://github.com/Deexv/sleekdo/blob/main/docs/CLI_REFERENCE.md) - Complete command reference
+- [Architecture Guide](https://github.com/Deexv/sleekdo/blob/main/docs/ARCHITECTURE.md) - System design and subsystems
+- [CLI Agent Guide](https://github.com/Deexv/sleekdo/blob/main/docs/CLI_AGENT_GUIDE.md) - Step-by-step setup for Pi CLI, Claude Code, and Agy
+
+## Prerequisites
+
+- Node.js 18 or higher
+- npm
+- One of the supported coding agents:
+  - [Pi CLI](https://github.com/earendil-works/pi-coding-agent) (recommended)
+  - [Claude Code](https://github.com/anthropics/claude-code)
+  - [Google Antigravity (Agy)](https://antigravity.dev/)
+
+## Contributing
+
+Contributions are welcome! Please read our contributing guidelines and submit pull requests.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Running tests
+## Author
 
-Sleekdo provides automated verification across multiple test tiers:
+Sleekdo Contributors
 
-```bash
-# Run unit and integration test suite
-npm test
+## Links
 
-# Run live end-to-end suite against installed Pi CLI
-npm run test:e2e
+- [GitHub Repository](https://github.com/Deexv/sleekdo)
+- [GitHub Releases](https://github.com/Deexv/sleekdo/releases)
+- [Issues](https://github.com/Deexv/sleekdo/issues)
+- [Documentation](https://github.com/Deexv/sleekdo/tree/main/docs)
 
-# Run all test suites
-npm run test:all
-```
+## Keywords
+
+agent orchestration, autonomous software development, AI coding assistant, code review, batch review, command cache, live streaming, Pi CLI, Claude Code, Antigravity, zero-repository-clone installer, software development lifecycle
+
+---
+
+**Sleekdo** helps you build better software faster with autonomous AI agents and rigorous verification.
+
+*Built with ❤️ for the open-source community*
