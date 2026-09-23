@@ -137,7 +137,7 @@ Example configuration in `.sleekdo/config.json`:
   "adapter": {
     "type": "pty",
     "command": "agy",
-    "args": ["run", "--prompt", "{prompt}"],
+    "args": ["-p", "{prompt}", "--dangerously-skip-permissions"],
     "timeoutMs": 300000,
     "idleTimeoutMs": 30000
   }

@@ -46,8 +46,8 @@ export class A3Reviewer {
         for await (const ev of this.adapter.events(session)) {
           if (ev.type === 'message') {
             outputText += String(ev.data.delta || ev.data.text || '');
-          } else if (ev.type === 'turn_completed' && ev.data.rawOutput) {
-            outputText += String(ev.data.rawOutput);
+          } else if (ev.type === 'turn_completed' && ev.data.rawOutput && !outputText) {
+            outputText = String(ev.data.rawOutput);
           }
         }
       })();
@@ -145,8 +145,8 @@ export class A3Reviewer {
         for await (const ev of this.adapter.events(session)) {
           if (ev.type === 'message') {
             outputText += String(ev.data.delta || ev.data.text || '');
-          } else if (ev.type === 'turn_completed' && ev.data.rawOutput) {
-            outputText += String(ev.data.rawOutput);
+          } else if (ev.type === 'turn_completed' && ev.data.rawOutput && !outputText) {
+            outputText = String(ev.data.rawOutput);
           }
         }
       })();

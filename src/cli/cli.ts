@@ -37,7 +37,7 @@ export function resolveProvider(
     return {
       isInteractive: true,
       providerName: 'Antigravity (Agy)',
-      adapter: new GenericPTYAdapter('agy', ['run', '--prompt', '{prompt}']),
+      adapter: new GenericPTYAdapter('agy', ['-p', '{prompt}', '--dangerously-skip-permissions']),
     };
   }
   if (lower === '--claude' || lower === 'claude') {
@@ -56,7 +56,7 @@ export function resolveProvider(
       return {
         isInteractive: true,
         providerName: 'Antigravity (Agy)',
-        adapter: new GenericPTYAdapter('agy', ['run', '--prompt', '{prompt}']),
+        adapter: new GenericPTYAdapter('agy', ['-p', '{prompt}', '--dangerously-skip-permissions']),
       };
     }
     if (prov === 'claude') {
