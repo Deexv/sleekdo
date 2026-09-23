@@ -30,7 +30,8 @@ export interface OrchestratorProgressEvent {
     | 'task_start'
     | 'task_implementing'
     | 'tests_running'
-    | 'review_pending'
+    | 'task_executed'
+    | 'batch_reviewing'
     | 'task_approved'
     | 'task_rejected'
     | 'reassessing'
@@ -86,6 +87,7 @@ export class Orchestrator {
   private readonly maxIterations: number;
   private rejectionCounts = new Map<TaskId, number>();
   private autoRetryCounts = new Map<TaskId, number>();
+  private executionSummaries = new Map<TaskId, string>();
 
   constructor(options: OrchestratorOptions) {
     this.workspaceDir = path.resolve(options.workspaceDir);
@@ -119,8 +121,12 @@ export class Orchestrator {
     this.worker = new A1Worker(workerAdapter, this.workspaceDir);
     this.planner = new A2Planner(plannerAdapter, this.workspaceDir);
     this.reviewer = new A3Reviewer(reviewerAdapter, this.workspaceDir);
+    this.agentAdapter = workerAdapter;
     this.onProgress = options.onProgress;
   }
+
+  /** Raw agent adapter, exposed for interactive CLI chat prompts. */
+  public readonly agentAdapter: AgentAdapter;
 
   public onProgress?: OrchestratorProgressCallback;
 
@@ -268,6 +274,29 @@ export class Orchestrator {
     });
 
     this.notifyProgress({ phase: 'plan_reviewed', message: 'Plan independently reviewed' });
+  }
+
+  /**
+   * Treats a user prompt as an updated build objective: it is added to the
+   * existing objective, with the latest prompt taking priority wherever the
+   * two conflict. Re-plans the task list accordingly (obsolete tasks marked,
+   * new tasks added). Fresh projects are initialized with the prompt as-is.
+   */
+  public async refineObjective(prompt: string): Promise<boolean> {
+    const state = this.stateStore.getState();
+    if (!state.originalRequest || Object.keys(state.tasks).length === 0) {
+      await this.initialize(prompt);
+      return true;
+    }
+
+    const merged = [
+      prompt,
+      '',
+      `[The directive above is the latest user input and takes priority over any conflicting part of the earlier objective below.]`,
+      `[Earlier objective (for reference, superseded where conflicting): ${state.originalRequest}]`,
+    ].join('\n');
+
+    return this.handleRequirementChange(merged);
   }
 
   public async handleRequirementChange(newRequest: string): Promise<boolean> {
@@ -466,6 +495,18 @@ export class Orchestrator {
           continue;
         }
 
+        // End-of-run batch review: verify ALL executed tasks in one A3 session
+        const awaitingReview = Object.values(this.stateStore.getState().tasks).filter(
+          (t) => t.status === 'AWAITING_REVIEW'
+        );
+        if (awaitingReview.length > 0) {
+          const batchApproved = await this.runBatchReview(awaitingReview);
+          if (batchApproved) {
+            continue; // all approved -> next loop proceeds to final verification
+          }
+          continue; // rejections recorded -> tasks reset to READY for rework
+        }
+
         // Evaluate final verification
         const finalVerification = await this.finalVerifier.verifySystem({
           testCommand: this.testCommand,
@@ -514,6 +555,138 @@ export class Orchestrator {
     }
 
     return this.stateStore.getState().status === 'COMPLETE';
+  }
+
+  /**
+   * Runs ONE review session covering every executed task. Approved tasks are
+   * marked APPROVED; rejected tasks are sent back to READY for rework.
+   * Returns true when every reviewed task passed.
+   */
+  private async runBatchReview(awaitingTasks: Task[]): Promise<boolean> {
+    this.notifyProgress({
+      phase: 'batch_reviewing',
+      message: `Reviewing all ${awaitingTasks.length} completed task(s) in one pass...`,
+    });
+
+    this.eventStore.appendEvent(this.stateStore.getRevision(), 'A3_REVIEW_STARTED', 'ORCHESTRATOR', {
+      mode: 'batch',
+      taskIds: awaitingTasks.map((t) => t.id),
+    });
+
+    let testSummary = 'Tests not executed';
+    try {
+      const testRes = await this.testEngine.runTests(this.testCommand, this.testArgs);
+      testSummary = `Passed: ${testRes.passedTests}/${testRes.totalTests}, Exit: ${testRes.passed ? 0 : 1}`;
+    } catch {
+      // keep default
+    }
+
+    const verdict = await this.reviewer.reviewAllTasks({
+      originalRequest: this.stateStore.getState().originalRequest || '',
+      tasks: awaitingTasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        objective: t.objective,
+        requirements: t.requirements || [],
+        acceptanceCriteria: t.acceptanceCriteria || [],
+        workerSummary: this.executionSummaries.get(t.id) || 'No worker summary recorded',
+      })),
+      testSummary,
+      gitDiff: this.gitEngine.getDiff(),
+    });
+
+    if (verdict.approved) {
+      for (const t of awaitingTasks) {
+        const syntheticReview: ReviewResult = {
+          id: `rev_batch_${Date.now()}_${t.id}`,
+          taskId: t.id,
+          stateRevision: this.stateStore.getRevision(),
+          workspaceSnapshotSha: 'batch_review',
+          reviewerProvider: this.reviewerAdapterName(),
+          reviewerModel: 'batch-review',
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+          decision: 'APPROVE',
+          summary: verdict.summary || 'Approved in end-of-run batch review',
+          requirementCompliance: true,
+          acceptanceCriteriaMet: true,
+          implementationExists: true,
+          testsPass: true,
+          noRegressions: true,
+          scopeControlled: true,
+          noDeadCodeIntroduced: true,
+          blockingIssues: [],
+        };
+        this.artifactStore.saveReview(syntheticReview);
+        this.handleTaskApproval(t.id, syntheticReview);
+      }
+      return true;
+    }
+
+    // Some tasks rejected: record rejections with per-task blocking issues
+    const rejectedSet = new Set(verdict.rejectedTaskIds);
+    for (const t of awaitingTasks) {
+      if (!rejectedSet.has(t.id)) {
+        // Not explicitly rejected -> approved in batch
+        const syntheticReview: ReviewResult = {
+          id: `rev_batch_${Date.now()}_${t.id}`,
+          taskId: t.id,
+          stateRevision: this.stateStore.getRevision(),
+          workspaceSnapshotSha: 'batch_review',
+          reviewerProvider: this.reviewerAdapterName(),
+          reviewerModel: 'batch-review',
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+          decision: 'APPROVE',
+          summary: verdict.summary || 'Approved in end-of-run batch review',
+          requirementCompliance: true,
+          acceptanceCriteriaMet: true,
+          implementationExists: true,
+          testsPass: true,
+          noRegressions: true,
+          scopeControlled: true,
+          noDeadCodeIntroduced: true,
+          blockingIssues: [],
+        };
+        this.artifactStore.saveReview(syntheticReview);
+        this.handleTaskApproval(t.id, syntheticReview);
+      } else {
+        const issues = verdict.blockingIssues.filter((b) => b.taskId === t.id);
+        const rejectionReview: ReviewResult = {
+          id: `rev_batch_${Date.now()}_${t.id}`,
+          taskId: t.id,
+          stateRevision: this.stateStore.getRevision(),
+          workspaceSnapshotSha: 'batch_review',
+          reviewerProvider: this.reviewerAdapterName(),
+          reviewerModel: 'batch-review',
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+          decision: 'REJECT',
+          summary: issues.map((i) => i.description).join('; ') || verdict.summary || 'Rejected in batch review',
+          requirementCompliance: false,
+          acceptanceCriteriaMet: false,
+          implementationExists: true,
+          testsPass: true,
+          noRegressions: true,
+          scopeControlled: true,
+          noDeadCodeIntroduced: true,
+          blockingIssues: issues.map((i) => ({
+            description: i.description,
+            evidence: 'End-of-run batch review',
+            affectedRequirement: t.requirements[0] || 'Batch review',
+            requiredFix: i.requiredFix,
+            verification: 'Task must pass batch review criteria on retry',
+          })),
+        };
+        this.artifactStore.saveReview(rejectionReview);
+        this.handleTaskRejection(t.id, rejectionReview);
+      }
+    }
+    return false;
+  }
+
+  private reviewerAdapterName(): string {
+    return (this.reviewer as unknown as { adapter?: { name?: string } }).adapter?.name || 'A3';
   }
 
   private autoRetryStalledTasks(): boolean {
@@ -637,126 +810,90 @@ export class Orchestrator {
       taskId
     );
 
-    // 4. Freeze workspace during review (PRD Section 49)
-    this.lock.acquire('A3', `Reviewing task ${taskId}`);
+    // 4. Capture final workspace state & diff (isolation check only; formal review is deferred to end-of-run batch)
+    const finalSnapshot = this.snapshotEngine.captureSnapshot();
+    this.artifactStore.saveSnapshot(finalSnapshot);
+    const diff = this.snapshotEngine.calculateDiff(baselineSnapshot, finalSnapshot);
 
-    try {
-      // 5. Capture final workspace state & diff
-      const finalSnapshot = this.snapshotEngine.captureSnapshot();
-      this.artifactStore.saveSnapshot(finalSnapshot);
-      const diff = this.snapshotEngine.calculateDiff(baselineSnapshot, finalSnapshot);
+    // Enforce Workspace Isolation (PRD Section 48)
+    const unauthorizedMutations = [...diff.createdFiles, ...diff.modifiedFiles, ...diff.deletedFiles]
+      .filter((f) => f.startsWith('.sleekdo/') || f === '.sleekdo');
 
-      // Enforce Workspace Isolation (PRD Section 48)
-      const unauthorizedMutations = [...diff.createdFiles, ...diff.modifiedFiles, ...diff.deletedFiles]
-        .filter((f) => f.startsWith('.sleekdo/') || f === '.sleekdo');
-
-      if (unauthorizedMutations.length > 0) {
-        this.eventStore.appendEvent(
-          this.stateStore.getRevision(),
-          'TASK_REJECTED',
-          'ORCHESTRATOR',
-          {
-            taskId,
-            reason: `Workspace isolation violation: A1 mutated protected Sleekdo control files: ${unauthorizedMutations.join(', ')}`,
-          },
-          taskId
-        );
-
-        const isolationViolationReview: ReviewResult = {
-          id: `rev_isolation_${Date.now()}`,
-          taskId,
-          stateRevision: this.stateStore.getRevision(),
-          workspaceSnapshotSha: finalSnapshot.gitCommit || 'fs_snapshot',
-          reviewerProvider: 'orchestrator',
-          reviewerModel: 'workspace-guard',
-          startedAt: Date.now(),
-          completedAt: Date.now(),
-          decision: 'REJECT',
-          summary: `Workspace isolation violation: A1 attempted to write to protected control directory .sleekdo/ (${unauthorizedMutations.join(', ')}).`,
-          requirementCompliance: false,
-          acceptanceCriteriaMet: false,
-          implementationExists: false,
-          testsPass: false,
-          noRegressions: false,
-          scopeControlled: false,
-          noDeadCodeIntroduced: true,
-          blockingIssues: [
-            {
-              description: `A1 modified protected control files: ${unauthorizedMutations.join(', ')}`,
-              evidence: unauthorizedMutations[0],
-              affectedRequirement: task.requirements[0] || 'PRD Section 48',
-              requiredFix: 'Do not modify files inside .sleekdo/. Sleekdo control state is immutable to worker agents.',
-              verification: 'Check that .sleekdo directory is untouched by task execution.',
-            },
-          ],
-        };
-
-        this.handleTaskRejection(taskId, isolationViolationReview);
-        return;
-      }
-
-      // Collect git diff and test evidence
-      const gitDiff = this.gitEngine.getDiff();
-      let testSummary: string | undefined;
-      this.notifyProgress({ phase: 'tests_running', taskId: task.id, taskTitle: task.title, message: 'Tests: running...' });
-      try {
-        const testRes = await this.testEngine.runTests(this.testCommand, this.testArgs);
-        testSummary = `Passed: ${testRes.passedTests}/${testRes.totalTests}, Exit: ${testRes.passed ? 0 : 1}`;
-      } catch {
-        testSummary = 'Tests not executed or command failed';
-      }
-
-      // 6. Transition to AWAITING_REVIEW
-      this.stateStore.updateState((draft) => {
-        const t = draft.tasks[taskId];
-        if (t) {
-          TaskStateMachine.transition(t, 'AWAITING_REVIEW', draft.tasks);
-        }
-      });
-      this.notifyProgress({ phase: 'review_pending', taskId: task.id, taskTitle: task.title, message: 'Review: pending...' });
-
+    if (unauthorizedMutations.length > 0) {
       this.eventStore.appendEvent(
         this.stateStore.getRevision(),
-        'TASK_REVIEW_STARTED',
+        'TASK_REJECTED',
         'ORCHESTRATOR',
-        { taskId },
+        {
+          taskId,
+          reason: `Workspace isolation violation: A1 mutated protected Sleekdo control files: ${unauthorizedMutations.join(', ')}`,
+        },
         taskId
       );
 
-      // 7. Fresh clean A3 session verifies task
-      const reviewContext = this.reviewContextBuilder.buildContext(
-        task,
-        this.stateStore.getState(),
-        diff,
-        executionResult.summary,
-        gitDiff,
-        testSummary
-      );
+      const isolationViolationReview: ReviewResult = {
+        id: `rev_isolation_${Date.now()}`,
+        taskId,
+        stateRevision: this.stateStore.getRevision(),
+        workspaceSnapshotSha: finalSnapshot.gitCommit || 'fs_snapshot',
+        reviewerProvider: 'orchestrator',
+        reviewerModel: 'workspace-guard',
+        startedAt: Date.now(),
+        completedAt: Date.now(),
+        decision: 'REJECT',
+        summary: `Workspace isolation violation: A1 attempted to write to protected control directory .sleekdo/ (${unauthorizedMutations.join(', ')}).`,
+        requirementCompliance: false,
+        acceptanceCriteriaMet: false,
+        implementationExists: false,
+        testsPass: false,
+        noRegressions: false,
+        scopeControlled: false,
+        noDeadCodeIntroduced: true,
+        blockingIssues: [
+          {
+            description: `A1 modified protected control files: ${unauthorizedMutations.join(', ')}`,
+            evidence: unauthorizedMutations[0],
+            affectedRequirement: task.requirements[0] || 'PRD Section 48',
+            requiredFix: 'Do not modify files inside .sleekdo/. Sleekdo control state is immutable to worker agents.',
+            verification: 'Check that .sleekdo directory is untouched by task execution.',
+          },
+        ],
+      };
 
-      const reviewResult: ReviewResult = await this.reviewer.reviewTask(
-        reviewContext,
-        finalSnapshot.gitCommit || 'fs_snapshot'
-      );
-
-      this.artifactStore.saveReview(reviewResult);
-
-      // 8. Process review decision
-      if (reviewResult.decision === 'APPROVE') {
-        this.handleTaskApproval(taskId, reviewResult);
-      } else if (reviewResult.decision === 'REJECT') {
-        this.handleTaskRejection(taskId, reviewResult);
-      } else {
-        this.handleTaskBlocked(taskId, reviewResult);
-      }
-    } finally {
-      // Unlock workspace after review completes
-      this.lock.unlock();
-      this.stateStore.updateState((draft) => {
-        if (draft.currentTaskId === taskId) {
-          draft.currentTaskId = null;
-        }
-      });
+      this.handleTaskRejection(taskId, isolationViolationReview);
+      return;
     }
+
+    // Run test evidence collection
+    let testSummary: string | undefined;
+    this.notifyProgress({ phase: 'tests_running', taskId: task.id, taskTitle: task.title, message: 'Tests: running...' });
+    try {
+      const testRes = await this.testEngine.runTests(this.testCommand, this.testArgs);
+      testSummary = `Passed: ${testRes.passedTests}/${testRes.totalTests}, Exit: ${testRes.passed ? 0 : 1}`;
+    } catch {
+      testSummary = 'Tests not executed or command failed';
+    }
+
+    // 5. Mark executed: formal A3 review is deferred to a single batch review at end of run
+    this.executionSummaries.set(taskId, executionResult.summary);
+    this.stateStore.updateState((draft) => {
+      const t = draft.tasks[taskId];
+      if (t) {
+        TaskStateMachine.transition(t, 'AWAITING_REVIEW', draft.tasks);
+      }
+    });
+    this.notifyProgress({
+      phase: 'task_executed',
+      taskId: task.id,
+      taskTitle: task.title,
+      message: 'Executed. Queued for final batch review.',
+    });
+
+    this.stateStore.updateState((draft) => {
+      if (draft.currentTaskId === taskId) {
+        draft.currentTaskId = null;
+      }
+    });
   }
 
   private handleTaskApproval(taskId: TaskId, review: ReviewResult): void {

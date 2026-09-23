@@ -183,6 +183,173 @@ export class A3Reviewer {
     return planResult;
   }
 
+  /**
+   * Batch review: verify ALL executed tasks in a single review session.
+   * Returns which tasks (if any) must be reworked instead of reviewing one-by-one.
+   */
+  public async reviewAllTasks(payload: {
+    originalRequest: string;
+    tasks: Array<{
+      id: string;
+      title: string;
+      objective: string;
+      requirements: string[];
+      acceptanceCriteria: string[];
+      workerSummary: string;
+    }>;
+    testSummary: string;
+    gitDiff: string;
+  }): Promise<{
+    approved: boolean;
+    rejectedTaskIds: string[];
+    summary: string;
+    blockingIssues: Array<{ taskId: string; description: string; requiredFix: string }>;
+  }> {
+    const startedAt = Date.now();
+    const taskIds = new Set(payload.tasks.map((t) => t.id));
+
+    const taskBlocks = payload.tasks
+      .map(
+        (t) =>
+          [
+            `--- TASK ${t.id}: ${t.title} ---`,
+            `Objective: ${t.objective}`,
+            `Requirements: ${t.requirements.join(', ') || 'none'}`,
+            `Acceptance criteria: ${t.acceptanceCriteria.join('; ') || 'none'}`,
+            `Worker summary: ${t.workerSummary}`,
+          ].join('\n')
+      )
+      .join('\n\n');
+
+    const prompt = [
+      '### FINAL BATCH REVIEW: ALL COMPLETED TASKS',
+      `Original request: ${payload.originalRequest}`,
+      '',
+      'All tasks below were implemented by the worker. Independently verify each one against its',
+      'requirements and acceptance criteria using observable evidence in the workspace (read files, run nothing).',
+      '',
+      '### TESTS:',
+      payload.testSummary,
+      '',
+      '### WORKSPACE DIFF (aggregate):',
+      payload.gitDiff.slice(0, 8000),
+      '',
+      '### TASKS TO VERIFY:',
+      taskBlocks,
+      '',
+      'Respond with a JSON object matching this schema:',
+      '{',
+      '  "approved": boolean,  // true only if EVERY task passes',
+      '  "rejectedTaskIds": ["task_001"],  // ids of tasks that fail and must be reworked',
+      '  "summary": "overall verdict summary",',
+      '  "blockingIssues": [ { "taskId": "task_001", "description": "what fails", "requiredFix": "what must change" } ]',
+      '}',
+      'Output raw JSON only.',
+    ].join('\n');
+
+    const maxRetries = 2;
+    let retries = 0;
+    let result: {
+      approved: boolean;
+      rejectedTaskIds: string[];
+      summary: string;
+      blockingIssues: Array<{ taskId: string; description: string; requiredFix: string }>;
+    } | null = null;
+    let currentPrompt = prompt;
+
+    while (retries <= maxRetries) {
+      const session: AgentSession = await this.adapter.start({
+        workspaceDir: this.workspaceDir,
+        role: 'A3',
+        systemPrompt: this.promptTemplate,
+        ephemeralSession: true,
+        tools: ['read', 'grep', 'find', 'ls'],
+      });
+
+      let outputText = '';
+      const eventPromise = (async () => {
+        for await (const ev of this.adapter.events(session)) {
+          if (ev.type === 'message') {
+            outputText += String(ev.data.delta || ev.data.text || '');
+          } else if (ev.type === 'turn_completed' && ev.data.rawOutput && !outputText) {
+            outputText = String(ev.data.rawOutput);
+          }
+        }
+      })();
+
+      await this.adapter.send(session, currentPrompt);
+      while (!(await this.adapter.detectTurnCompletion(session))) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      await this.adapter.stop(session);
+      await eventPromise;
+
+      const parsed = this.tryParseBatchReview(outputText, taskIds);
+      if (parsed) {
+        result = parsed;
+        break;
+      }
+
+      retries++;
+      if (retries <= maxRetries) {
+        currentPrompt = `### BATCH REVIEW SCHEMA VALIDATION FAILED (Attempt ${retries}/${maxRetries})\nRespond ONLY with valid JSON matching the batch review schema.`;
+      }
+    }
+
+    if (!result) {
+      // Escalate: treat everything as needing rework, orchestrator caps retries.
+      return {
+        approved: false,
+        rejectedTaskIds: [...taskIds],
+        summary: 'Batch review repeatedly failed schema validation; all tasks sent back for rework (PRD Section 87).',
+        blockingIssues: [],
+      };
+    }
+
+    return result;
+  }
+
+  private tryParseBatchReview(
+    text: string,
+    validTaskIds: Set<string>
+  ): {
+    approved: boolean;
+    rejectedTaskIds: string[];
+    summary: string;
+    blockingIssues: Array<{ taskId: string; description: string; requiredFix: string }>;
+  } | null {
+    const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      const obj = JSON.parse(match[1] || match[0]);
+      if (typeof obj.approved !== 'boolean') return null;
+      if (!Array.isArray(obj.rejectedTaskIds)) return null;
+      const rejectedTaskIds = (obj.rejectedTaskIds as unknown[]).filter(
+        (id): id is string => typeof id === 'string' && validTaskIds.has(id)
+      );
+      const blockingIssues = Array.isArray(obj.blockingIssues)
+        ? (obj.blockingIssues as unknown[])
+            .filter(
+              (b): b is { taskId: string; description: string; requiredFix: string } =>
+                !!b && typeof b === 'object' && typeof (b as any).description === 'string'
+            )
+            .map((b) => ({
+              taskId: typeof (b as any).taskId === 'string' && validTaskIds.has((b as any).taskId) ? (b as any).taskId : '',
+              description: (b as any).description,
+              requiredFix: typeof (b as any).requiredFix === 'string' ? (b as any).requiredFix : 'See review summary',
+            }))
+        : [];
+      return {
+        approved: obj.approved && rejectedTaskIds.length === 0,
+        rejectedTaskIds,
+        summary: typeof obj.summary === 'string' ? obj.summary : 'Batch review completed',
+        blockingIssues,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   private constructReviewPrompt(context: ReviewContext): string {
     const lines = [
       `### REVIEW ASSIGNMENT FOR TASK: ${context.task.id}`,
