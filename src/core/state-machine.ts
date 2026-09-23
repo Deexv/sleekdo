@@ -54,7 +54,10 @@ export class TaskStateMachine {
         if (!dep) {
           throw new DependencyNotMetError(task.id, depId);
         }
-        if (dep.status !== 'APPROVED') {
+        // A dependency is satisfied when it is APPROVED, or when it has been
+        // executed and is queued for the end-of-run batch review (it will be
+        // reviewed there; blocking dependents until then would deadlock).
+        if (dep.status !== 'APPROVED' && dep.status !== 'AWAITING_REVIEW') {
           throw new DependencyNotMetError(task.id, depId);
         }
       }

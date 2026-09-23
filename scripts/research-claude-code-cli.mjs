@@ -128,3 +128,32 @@ fs.writeFileSync(path.join(outDir, 'ui-patterns-summary.md'), summaryLines.join(
 console.log(`\nSaved raw pages + ui-patterns-summary.md to ${outDir}`);
 console.log(`\n=== EXTRACTED UI PATTERNS (first 120 lines) ===`);
 console.log(summaryLines.slice(0, 120).join('\n'));
+
+// ─── Extended research: how Ink/claude-code render input ───
+async function researchExtra() {
+  const extra = [
+    { name: 'ink-readme', url: 'https://raw.githubusercontent.com/vadimdemedes/ink/master/readme.md' },
+    { name: 'claude-code-fullscreen', url: 'https://code.claude.com/docs/en/interactive-mode#fullscreen-rendering' },
+  ];
+  const lines = ['\n### INPUT RENDERING RESEARCH'];
+  for (const src of extra) {
+    try {
+      const { status, body } = await fetch(src.url);
+      const text = src.url.includes('raw.githubusercontent') ? body : htmlToText(body);
+      fs.writeFileSync(path.join(outDir, src.name + '.txt'), text);
+      lines.push(`\n#### ${src.name} (${status})`);
+      // grab fragments about input, raw mode, cursor, alt screen
+      for (const kw of ['raw mode', 'alternate screen', 'cursor', 'input box', 'fullscreen', 'Static', 'rerender', 'cursorTo', 'clearLine']) {
+        const idx = text.toLowerCase().indexOf(kw.toLowerCase());
+        if (idx >= 0) {
+          lines.push(`- [${kw}] …${text.slice(Math.max(0, idx - 100), idx + 250).replace(/\s+/g, ' ')}…`);
+        }
+      }
+    } catch (e) {
+      lines.push(`\n#### ${src.name} FAILED: ${e.message}`);
+    }
+  }
+  fs.appendFileSync(path.join(outDir, 'ui-patterns-summary.md'), lines.join('\n'));
+  console.log(lines.join('\n').slice(0, 3000));
+}
+await researchExtra();

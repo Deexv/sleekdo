@@ -11,8 +11,19 @@ import { EventStore } from '../storage/event-store.js';
 import { Task, TaskStatus } from '../types/domain.js';
 import { theme as style, glyphs } from './theme.js';
 import { Spinner, getSpinner, resultLine, hookLine } from './spinner.js';
+import { InputBox } from './input-box.js';
+import { StreamFormatter } from './text-format.js';
+import type { AgentEvent } from '../adapters/agent-adapter.js';
 
 const execAsync = promisify(exec);
+
+function safeParse(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return {};
+  }
+}
 
 const VERSION = '1.0.0';
 
@@ -40,7 +51,7 @@ export function formatBoxHeader(agentName: string, projectName: string, _width =
     '',
     `  ${style.dim('agent')}     ${style.white(agentName)}`,
     `  ${style.dim('project')}   ${style.white(projectName)}`,
-    `  ${style.dim('input')}     ${style.dim('type anything to update the objective · /commands · !shell · ? hints')}`,
+    `  ${style.dim('input')}     ${style.dim('type anything to chat · /lockin to set the objective · /commands · !shell · ? hints')}`,
   ].join('\n');
 }
 
@@ -90,6 +101,9 @@ export class InteractiveCliSession {
   private lineQueue: string[] = [];
   private lineResolver: ((v: string) => void) | null = null;
   private boxRedraw: string | null = null;
+  private chatSession: Awaited<ReturnType<AgentAdapter['start']>> | null = null;
+  private rawModeAvailable = false;
+  private rawHistory: string[] = [];
 
   constructor(options: InteractiveCliOptions) {
     this.workspaceDir = path.resolve(options.workspaceDir);
@@ -108,6 +122,7 @@ export class InteractiveCliSession {
         testCommand: options.testCommand,
         testArgs: options.testArgs,
         maxConsecutiveRejections: options.maxConsecutiveRejections,
+        agentEventSink: (role, ev) => this.handleAgentEvent(role, ev),
       });
     }
 
@@ -130,7 +145,91 @@ export class InteractiveCliSession {
     spinner.start(verb, detail);
   }
 
+  /* Live agent streaming: show what A1/A2/A3 are actually doing.
+     Tool calls print as dim lines; A1 narration streams live. The spinner
+     yields its row while content is being printed. */
+  private lastWasStreamedText = false;
+  private streamFormatter: StreamFormatter | null = null;
+  private streamIdleTimer: NodeJS.Timeout | null = null;
+
+  /* While streaming, show a loader if the agent goes quiet — proof it's
+     still running rather than hung. Cleared the instant new activity flows. */
+  private armIdleLoader(role: 'A1' | 'A2' | 'A3'): void {
+    this.clearIdleLoader();
+    this.streamIdleTimer = setTimeout(() => {
+      this.streamIdleTimer = null;
+      // Flush any buffered partial line so nothing stays hidden, then load
+      if (this.streamFormatter) {
+        const tail = this.streamFormatter.flush();
+        if (tail) this.outStream.write(style.dim(tail) + '\n');
+        this.streamFormatter = null;
+        this.lastWasStreamedText = false;
+      }
+      getSpinner(this.outStream).start('Working', `${role} still running`);
+    }, 600);
+  }
+
+  private clearIdleLoader(): void {
+    if (this.streamIdleTimer) {
+      clearTimeout(this.streamIdleTimer);
+      this.streamIdleTimer = null;
+    }
+  }
+
+  private handleAgentEvent(role: 'A1' | 'A2' | 'A3', ev: AgentEvent): void {
+    if (!(this.outStream as any).isTTY) return; // keep piped output clean
+    const spinner = getSpinner(this.outStream);
+    this.clearIdleLoader();
+
+    if (ev.type === 'tool_call') {
+      spinner.stop();
+      this.lastWasStreamedText = false;
+      const data = ev.data || {};
+      const name = String(data.name || data.tool || 'tool');
+      const args = typeof data.args === 'string' ? safeParse(data.args) : data.args || {};
+      const target = String(
+        (args as any).file_path || (args as any).path || (args as any).file || (args as any).command || (args as any).pattern || ''
+      ).slice(0, 48);
+      this.print(`  ${style.dim(glyphs.gear)} ${style.text(name)} ${style.dim(target)}`);
+      this.armIdleLoader(role);
+      return;
+    }
+
+    if (ev.type === 'tool_result') {
+      this.armIdleLoader(role);
+      return;
+    }
+
+    if (ev.type === 'error') {
+      spinner.stop();
+      this.lastWasStreamedText = false;
+      this.print(`  ${style.error('✗ agent error:')} ${style.dim(String(ev.data?.message || 'unknown'))}`);
+      return;
+    }
+
+    if (ev.type === 'message') {
+      const delta = String(ev.data?.delta || ev.data?.text || '');
+      if (!delta) return;
+      if (role === 'A1') {
+        // Stream the worker's narration live, formatted from markdown
+        if (!this.lastWasStreamedText) {
+          spinner.stop();
+          this.streamFormatter = new StreamFormatter((this.outStream as any).columns);
+        }
+        this.lastWasStreamedText = true;
+        const formatted = this.streamFormatter!.feed(delta);
+        if (formatted) this.outStream.write(style.dim(formatted));
+        this.armIdleLoader(role);
+      } else {
+        // A2/A3 narrate in JSON/plan text — show activity, not walls of JSON
+        this.lastWasStreamedText = false;
+      }
+    }
+  }
+
+
   private handleProgressEvent(event: OrchestratorProgressEvent): void {
+    this.clearIdleLoader(); // orchestrator phase change takes over the spinner
     const spinner = getSpinner(this.outStream);
     switch (event.phase) {
       /* Ongoing work: animated spinner with elapsed time */
@@ -235,6 +334,61 @@ export class InteractiveCliSession {
     }
   }
 
+  /* Normal CLI conversation: user prompt goes to the agent with workspace
+     tool access, response streams live. */
+  private async sendAgentPrompt(text: string): Promise<void> {
+    const adapter = this.orchestrator.agentAdapter;
+    if (!adapter || typeof adapter.start !== 'function') {
+      this.print(`${style.error('Agent unavailable.')} ${style.dim('Cannot send prompts in this mode.')}`);
+      return;
+    }
+
+    this.print(style.dim(`› ${text}`));
+    this.print(`\n${style.accentBold(glyphs.star)} ${style.accent('Responding')}…\n`);
+
+    try {
+      if (!this.chatSession || !(await adapter.isAlive(this.chatSession))) {
+        this.chatSession = await adapter.start({
+          workspaceDir: this.workspaceDir,
+          role: 'A1',
+          systemPrompt:
+            'You are the interactive assistant embedded in the Sleekdo CLI. Answer questions, inspect the workspace with tools when asked, and help the user drive their project. Be concise.',
+          tools: ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'],
+          ephemeralSession: false,
+        });
+      }
+
+      let sawOutput = false;
+      const eventPromise = (async () => {
+        for await (const ev of adapter.events(this.chatSession!)) {
+          if (ev.type === 'message') {
+            const delta = String(ev.data.delta || ev.data.text || '');
+            if (delta) {
+              sawOutput = true;
+              this.outStream.write(style.text(delta));
+            }
+          } else if (ev.type === 'tool_call') {
+            this.outStream.write(style.dim(`\n  ${glyphs.gear} ${ev.data.name}…`));
+          } else if (ev.type === 'tool_result') {
+            this.outStream.write(style.dim(' done'));
+          } else if (ev.type === 'turn_completed' && !sawOutput && ev.data.rawOutput) {
+            sawOutput = true;
+            this.outStream.write(style.text(String(ev.data.rawOutput)));
+          }
+        }
+      })();
+
+      await adapter.send(this.chatSession, text);
+      while (!(await adapter.detectTurnCompletion(this.chatSession))) {
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      await eventPromise;
+      this.outStream.write('\n');
+    } catch (e: any) {
+      this.print(`${style.error('Agent error:')} ${e.message || e}`);
+    }
+  }
+
   /* ! shell mode: run a command directly, like Claude Code */
   private async runShellCommand(command: string): Promise<void> {
     this.print(style.dim(`$ ${command}`));
@@ -265,7 +419,7 @@ export class InteractiveCliSession {
     }
     // ? on empty-ish input toggles the shortcut help panel
     if (trimmed === '?') {
-      this.print(style.dim('Shortcuts: /commands · ! shell mode · ? help · type anything to chat with the agent'));
+      this.print(style.dim('Shortcuts: /commands · /lockin <prompt> set objective · ! shell mode · ? help · anything else chats with the agent'));
       return true;
     }
 
@@ -299,7 +453,8 @@ export class InteractiveCliSession {
           this.print(`  ${style.green(name.padEnd(20))} ${style.dim(desc)}`);
         }
         this.print(`\n${style.boldGreen('✻ Input')} `);
-        this.print(`  ${style.green('type anything')}         ${style.dim('update the build objective — merged with the current one, latest wins')}`);
+        this.print(`  ${style.green('type anything')}         ${style.dim('chat with the agent about your project')}`);
+        this.print(`  ${style.green('/lockin <prompt>')}       ${style.dim('add to / change the build objective (re-plans tasks)')}`);
         this.print(`  ${style.green('/<command>')}           ${style.dim('run a slash command, e.g. /tasks')}`);
         this.print(`  ${style.green('!<shell command>')}     ${style.dim('run a shell command directly')}`);
         this.print(`  ${style.green('↑ / ↓')}                 ${style.dim('recall input history')}`);
@@ -328,6 +483,15 @@ export class InteractiveCliSession {
         }
         this.print(`\n  ${style.bold('Tasks')}`);
         this.renderTasksList();
+        return true;
+      }
+
+      case 'lockin': {
+        if (!rest) {
+          this.print('Usage: lockin <what to add or change in the objective>');
+          return true;
+        }
+        await this.handleBuildRequest(rest);
         return true;
       }
 
@@ -479,9 +643,13 @@ export class InteractiveCliSession {
       }
 
       default:
-        // Any free-form prompt is an objective update: merged with the existing
-        // objective, latest prompt wins on conflict, task list re-planned.
-        await this.handleBuildRequest(trimmed);
+        // Fresh project: free-form text is the build objective.
+        // Active project: normal CLI conversation with the agent.
+        if (!this.stateStore.getState().originalRequest) {
+          await this.handleBuildRequest(trimmed);
+          return true;
+        }
+        await this.sendAgentPrompt(trimmed);
         return true;
     }
   }
@@ -491,7 +659,7 @@ export class InteractiveCliSession {
     const isUpdate = !!(state.originalRequest && Object.keys(state.tasks).length > 0);
     const spinner = getSpinner(this.outStream);
     if (isUpdate) {
-      spinner.start('Refining objective', 'latest input takes priority over conflicts');
+      spinner.start('Refining objective');
       const replanned = await this.orchestrator.refineObjective(request);
       spinner.stop();
       this.renderTasksList();
@@ -513,38 +681,43 @@ export class InteractiveCliSession {
     this.renderHeader();
 
     const state = this.stateStore.getState();
-    this.rl = readline.createInterface({
-      input: this.inStream,
-      output: this.wrapOutput(this.outStream),
-      terminal: true, // enables arrow-key history navigation
-      historySize: 200,
-      prompt: '',
-      completer: (line: string, cb: (err: null, hits: [string[], string]) => void) => {
-        cb(null, this.completer(line));
-      },
-    });
-    // Persistent command history (per project, like Claude Code)
-    (this.rl as unknown as { history: string[] }).history = this.loadHistory();
-    // readline emits 'close' when stdin ends (piped input, Ctrl+D)
-    this.rl.on('close', () => {
-      this.rlClosed = true;
-      if (this.lineResolver) {
-        const r = this.lineResolver;
-        this.lineResolver = null;
-        r('exit');
-      }
-    });
-    // Collect every line as it arrives; typed-ahead lines are queued so
-    // nothing is lost while the orchestrator is busy.
-    this.rl.on('line', (l: string) => {
-      if (this.lineResolver) {
-        const r = this.lineResolver;
-        this.lineResolver = null;
-        r(l);
-      } else {
-        this.lineQueue.push(l);
-      }
-    });
+    this.rawModeAvailable =
+      (this.inStream as any).isTTY === true && typeof (this.inStream as any).setRawMode === 'function';
+
+    if (!this.rawModeAvailable) {
+      // Non-TTY (piped/automated input): readline fallback, no raw mode
+      this.rl = readline.createInterface({
+        input: this.inStream,
+        output: this.outStream,
+        terminal: false,
+        historySize: 200,
+        prompt: '',
+      });
+    } else {
+      readline.emitKeypressEvents(this.inStream);
+    }
+    if (this.rl) {
+      // readline emits 'close' when stdin ends (piped input, Ctrl+D)
+      this.rl.on('close', () => {
+        this.rlClosed = true;
+        if (this.lineResolver) {
+          const r = this.lineResolver;
+          this.lineResolver = null;
+          r('exit');
+        }
+      });
+      // Collect every line as it arrives; typed-ahead lines are queued so
+      // nothing is lost while the orchestrator is busy.
+      this.rl.on('line', (l: string) => {
+        if (this.lineResolver) {
+          const r = this.lineResolver;
+          this.lineResolver = null;
+          r(l);
+        } else {
+          this.lineQueue.push(l);
+        }
+      });
+    }
 
     // If project is not yet initialized or has no tasks, prompt for objective or resume planning
     const hasTasks = Object.keys(state.tasks).length > 0;
@@ -598,14 +771,47 @@ export class InteractiveCliSession {
      pre-rendered and the cursor is moved inside it, so the ❯ and your text
      sit between complete borders instead of an open-ended line. */
   private askInput(): Promise<string> {
+    if (this.rawModeAvailable) {
+      return this.readViaBox();
+    }
+    return this.readViaReadline();
+  }
+
+  /* Raw-mode box on TTYs: full control, always-closed box, horizontal scroll. */
+  private async readViaBox(): Promise<string> {
+    if (this.rawHistory.length === 0) {
+      this.rawHistory = this.loadHistory();
+    }
+    const box = new InputBox({
+      stdin: this.inStream,
+      out: this.outStream,
+      history: this.rawHistory,
+      saveHistory: (line) => this.saveHistoryEntry(line),
+      complete: (line) => {
+        if (line.includes(' ')) return [];
+        const names = ['build ', 'lockin ', 'run', 'status', 'tasks', 'plan', 'pause', 'resume', 'review ', 'retry ', 'logs', 'clean', 'verify', 'help', 'exit', 'quit'];
+        return names.filter((c) => c.startsWith(line));
+      },
+      onDoubleCtrlC: () => {
+        this.print(style.dim('Exiting Sleekdo.'));
+        process.exit(0);
+      },
+    });
+    const line = await box.read();
+    if (line.trim()) this.rawHistory.push(line);
+    this.print(this.statusLine());
+    return line;
+  }
+
+  /* Readline fallback for non-TTY (piped/automated) input. */
+  private readViaReadline(): Promise<string> {
     return new Promise((resolve) => {
       if (!this.rl || this.rlClosed) {
         resolve('exit');
         return;
       }
       if (this.lineQueue.length > 0) {
-        const shifted = this.lineQueue.shift()!;
-        resolve(shifted);
+        resolve(this.lineQueue.shift()!);
         return;
       }
       this.lineResolver = resolve;
@@ -650,7 +856,7 @@ export class InteractiveCliSession {
   /* Tab completion: slash commands + task ids for retry/review */
   private completer(line: string): [string[], string] {
     const commands = [
-      'build ', 'run', 'status', 'tasks', 'plan', 'pause', 'resume',
+      'build ', 'lockin ', 'run', 'status', 'tasks', 'plan', 'pause', 'resume',
       'review ', 'retry ', 'logs', 'clean', 'verify', 'help', 'exit', 'quit',
     ].map((c) => '/' + c.trim()).concat(['!', '?']);
     const trimmed = line.trimStart();
@@ -668,7 +874,7 @@ export class InteractiveCliSession {
     }
     // First word: suggest command names even without a leading slash
     if (parts.length === 1 && !trimmed.startsWith('!') && !trimmed.startsWith('?')) {
-      const names = ['build ', 'run', 'status', 'tasks', 'plan', 'pause', 'resume', 'review ', 'retry ', 'logs', 'clean', 'verify', 'help', 'exit', 'quit'];
+      const names = ['build ', 'lockin ', 'run', 'status', 'tasks', 'plan', 'pause', 'resume', 'review ', 'retry ', 'logs', 'clean', 'verify', 'help', 'exit', 'quit'];
       const hits = names.filter((c) => c.trim().startsWith(trimmed));
       return [hits, trimmed];
     }

@@ -16,7 +16,8 @@ import { CommandEngine } from '../evidence/command-engine.js';
 import { TestEngine } from '../evidence/test-engine.js';
 import { SnapshotEngine } from '../evidence/snapshot-engine.js';
 import { DeadCodeAnalyzer } from '../analysis/dead-code-analyzer.js';
-import { AgentAdapter } from '../adapters/agent-adapter.js';
+import { AgentAdapter, AgentEvent } from '../adapters/agent-adapter.js';
+import { TeeAdapter } from '../adapters/tee-adapter.js';
 import { A1Worker } from '../roles/a1-worker.js';
 import { A2Planner } from '../roles/a2-planner.js';
 import { A3Reviewer } from '../roles/a3-reviewer.js';
@@ -56,6 +57,7 @@ export interface OrchestratorOptions {
   testArgs?: string[];
   maxIterations?: number;
   onProgress?: OrchestratorProgressCallback;
+  agentEventSink?: (role: 'A1' | 'A2' | 'A3', ev: AgentEvent) => void;
 }
 
 export class Orchestrator {
@@ -118,9 +120,14 @@ export class Orchestrator {
     const plannerAdapter = options.plannerAdapter || options.workerAdapter;
     const reviewerAdapter = options.reviewerAdapter || options.workerAdapter;
 
-    this.worker = new A1Worker(workerAdapter, this.workspaceDir);
-    this.planner = new A2Planner(plannerAdapter, this.workspaceDir);
-    this.reviewer = new A3Reviewer(reviewerAdapter, this.workspaceDir);
+    // Tee agent event streams to the sink (CLI live streaming) when provided
+    const sink = options.agentEventSink;
+    const maybeTee = (adapter: AgentAdapter, role: 'A1' | 'A2' | 'A3'): AgentAdapter =>
+      sink ? new TeeAdapter(adapter, (ev) => sink(role, ev)) : adapter;
+
+    this.worker = new A1Worker(maybeTee(workerAdapter, 'A1'), this.workspaceDir);
+    this.planner = new A2Planner(maybeTee(plannerAdapter, 'A2'), this.workspaceDir);
+    this.reviewer = new A3Reviewer(maybeTee(reviewerAdapter, 'A3'), this.workspaceDir);
     this.agentAdapter = workerAdapter;
     this.onProgress = options.onProgress;
   }
@@ -129,6 +136,9 @@ export class Orchestrator {
   public readonly agentAdapter: AgentAdapter;
 
   public onProgress?: OrchestratorProgressCallback;
+
+  /** Optional live tee of agent events (role, event) for CLI streaming. */
+  public agentEventSink?: (role: 'A1' | 'A2' | 'A3', ev: AgentEvent) => void;
 
   public calculateProgressPercent(): number {
     const state = this.stateStore.getState();
@@ -296,10 +306,10 @@ export class Orchestrator {
       `[Earlier objective (for reference, superseded where conflicting): ${state.originalRequest}]`,
     ].join('\n');
 
-    return this.handleRequirementChange(merged);
+    return this.handleRequirementChange(merged, { skipPlanReview: true });
   }
 
-  public async handleRequirementChange(newRequest: string): Promise<boolean> {
+  public async handleRequirementChange(newRequest: string, opts?: { skipPlanReview?: boolean }): Promise<boolean> {
     const prevRevision = this.stateStore.getRevision();
     this.eventStore.appendEvent(
       prevRevision,
@@ -345,16 +355,19 @@ export class Orchestrator {
       reason: reassessment.reason,
     };
 
-    // 4. A3 verifies revised plan (PRD Section 78)
-    const review = await this.reviewer.reviewPlan(JSON.stringify(revisedPlan, null, 2));
-    if (!review.approved) {
-      this.eventStore.appendEvent(
-        this.stateStore.getRevision(),
-        'PLAN_REJECTED',
-        'A3',
-        { reason: review.reason }
-      );
-      return false;
+    // 4. A3 verifies revised plan (PRD Section 78) — skipped for quick
+    //    objective refinements, where the A2 reassessment is authoritative.
+    if (!opts?.skipPlanReview) {
+      const review = await this.reviewer.reviewPlan(JSON.stringify(revisedPlan, null, 2));
+      if (!review.approved) {
+        this.eventStore.appendEvent(
+          this.stateStore.getRevision(),
+          'PLAN_REJECTED',
+          'A3',
+          { reason: review.reason }
+        );
+        return false;
+      }
     }
 
     // 5. Update requirements and tasks in state
@@ -551,7 +564,29 @@ export class Orchestrator {
       }
 
       // Step B: Execute the selected authorized task
-      await this.executeAuthorizedTask(nextTask);
+      try {
+        await this.executeAuthorizedTask(nextTask);
+      } catch (e: any) {
+        // A task whose dependencies are unmet must stall, not crash the run
+        if (e?.name === 'DependencyNotMetError' || e?.name === 'InvalidStateTransitionError') {
+          this.eventStore.appendEvent(
+            this.stateStore.getRevision(),
+            'TASK_BLOCKED',
+            'ORCHESTRATOR',
+            { taskId: nextTask.id, reason: e.message },
+            nextTask.id
+          );
+          this.stateStore.updateState((draft) => {
+            const t = draft.tasks[nextTask.id];
+            if (t) {
+              t.status = 'BLOCKED';
+              t.updatedAt = Date.now();
+            }
+          });
+          continue;
+        }
+        throw e;
+      }
     }
 
     return this.stateStore.getState().status === 'COMPLETE';
@@ -730,11 +765,15 @@ export class Orchestrator {
     const state = this.stateStore.getState();
     const tasks = Object.values(state.tasks);
 
-    // Update PENDING tasks whose dependencies are now all APPROVED
+    // Update PENDING tasks whose dependencies are all satisfied (approved or
+    // executed-and-queued for batch review)
     for (const t of tasks) {
       if (t.status === 'PENDING') {
-        const allDepsApproved = t.dependencies.every((depId) => state.tasks[depId]?.status === 'APPROVED');
-        if (allDepsApproved) {
+        const allDepsSatisfied = t.dependencies.every((depId) => {
+          const dep = state.tasks[depId];
+          return dep && (dep.status === 'APPROVED' || dep.status === 'AWAITING_REVIEW');
+        });
+        if (allDepsSatisfied) {
           this.stateStore.updateState((draft) => {
             const draftTask = draft.tasks[t.id];
             if (draftTask && draftTask.status === 'PENDING') {
