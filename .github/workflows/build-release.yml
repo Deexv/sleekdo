@@ -61,19 +61,7 @@ jobs:
 
       - name: Create binary
         run: |
-          node -e "
-const fs = require('fs');
-const content = \`#!/usr/bin/env node
-import { runCli } from './cli/cli.js';
-
-runCli(process.argv.slice(2)).catch((err) => {
-  console.error('[Sleekdo Fatal Error]:', err);
-  process.exit(1);
-});
-\`;
-fs.writeFileSync('dist/sleekdo', content);
-fs.chmodSync('dist/sleekdo', 0o755);
-"
+          cp bin/sleekdo.js dist/sleekdo && chmod +x dist/sleekdo
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
