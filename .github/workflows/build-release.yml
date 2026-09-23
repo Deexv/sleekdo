@@ -11,7 +11,25 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            name: sleekdo-linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+            name: sleekdo-linux-arm64
+          - os: macos-latest
+            target: darwin-arm64
+            name: sleekdo-macos-arm64
+          - os: macos-latest
+            target: darwin-x64
+            name: sleekdo-macos-x64
+          - os: windows-latest
+            target: win-x64
+            name: sleekdo-windows-x64
 
     steps:
       - name: Checkout
@@ -32,16 +50,23 @@ jobs:
         run: |
           cp bin/sleekdo.js dist/sleekdo && chmod +x dist/sleekdo
 
-      - name: Create tarball
+      - name: Create tarball (Linux/macOS)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          tar -czf dist/sleekdo-linux-x64.tar.gz -C dist sleekdo
-          sha256sum dist/sleekdo-linux-x64.tar.gz > dist/sleekdo-linux-x64.tar.gz.sha256
+          tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
+          sha256sum dist/${{ matrix.name }}.tar.gz > dist/${{ matrix.name }}.tar.gz.sha256
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p dist
+          powershell Compress-Archive -Path dist\sleekdo -DestinationPath dist\${{ matrix.name }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sleekdo-linux-x64
+          name: ${{ matrix.name }}
           path: dist/*
           retention-days: 30
 
