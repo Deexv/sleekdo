@@ -165,3 +165,97 @@ test('Orchestrator: complete lifecycle with recursive planning, A1/A2/A3, and fi
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('Orchestrator: requirement changes mid-development triggers impact analysis, plan versioning, and A3 re-verification (PRD Sections 78 & 79)', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleekdo-replan-test-'));
+  try {
+    const workerAdapter = new MockAdapter();
+    const plannerAdapter = new MockAdapter();
+    const reviewerAdapter = new MockAdapter();
+
+    // 1. Initial plan: A2 returns 1 task
+    plannerAdapter.addHandler(async (_input, _session, emit) => {
+      const plan = {
+        requirements: [{ id: 'req_001', description: 'Basic add', verificationCriteria: ['add works'] }],
+        tasks: [
+          {
+            id: 'task_001',
+            title: 'Implement add',
+            objective: 'Create add.ts',
+            requirements: ['req_001'],
+            acceptanceCriteria: ['add(1, 2) === 3'],
+            dependencies: [],
+            type: 'task',
+          },
+        ],
+      };
+      emit({ type: 'message', timestamp: Date.now(), data: { text: JSON.stringify(plan) } });
+    });
+
+    // 2. Initial plan review: A3 approves
+    reviewerAdapter.addHandler(async (_input, _session, emit) => {
+      emit({ type: 'message', timestamp: Date.now(), data: { text: JSON.stringify({ approved: true, reason: 'Valid' }) } });
+    });
+
+    const orchestrator = new Orchestrator({
+      workspaceDir: tmpDir,
+      workerAdapter,
+      plannerAdapter,
+      reviewerAdapter,
+    });
+
+    await orchestrator.initialize('Build math library');
+    assert.equal(orchestrator.stateStore.getState().planVersion, 1);
+
+    // Mid-flight user requirement change:
+    // A2 reassessment handler for revised plan
+    plannerAdapter.addHandler(async (_input, _session, emit) => {
+      const reassessment = {
+        remainingRequirements: [],
+        newlyDiscoveredRequirements: [
+          { id: 'req_002', description: 'Advanced multiply', verificationCriteria: ['multiply works'] },
+        ],
+        newTasks: [
+          {
+            id: 'task_002',
+            title: 'Implement multiply',
+            objective: 'Create mul.ts',
+            requirements: ['req_002'],
+            acceptanceCriteria: ['mul(2, 3) === 6'],
+            dependencies: [],
+            type: 'task',
+          },
+        ],
+        obsoleteTaskIds: ['task_001'],
+        defects: [],
+        isComplete: false,
+        reason: 'User requested multiply instead of add',
+      };
+      emit({ type: 'message', timestamp: Date.now(), data: { text: JSON.stringify(reassessment) } });
+    });
+
+    // A3 plan review handler for revised plan
+    reviewerAdapter.addHandler(async (_input, _session, emit) => {
+      emit({ type: 'message', timestamp: Date.now(), data: { text: JSON.stringify({ approved: true, reason: 'Revised plan viable' }) } });
+    });
+
+    const replanSuccess = await orchestrator.handleRequirementChange('Pivot to multiply utility');
+    assert.equal(replanSuccess, true);
+
+    const updatedState = orchestrator.stateStore.getState();
+    assert.equal(updatedState.originalRequest, 'Pivot to multiply utility');
+    assert.equal(updatedState.planVersion, 2);
+    assert.equal(updatedState.tasks['task_001'].status, 'REJECTED'); // Obsolete task marked
+    assert.ok(updatedState.tasks['task_002'], 'New task added');
+    assert.equal(updatedState.tasks['task_002'].status, 'READY');
+    assert.ok(updatedState.requirements['req_002'], 'New requirement added');
+    assert.equal(updatedState.planHistory.length, 2);
+    assert.equal(updatedState.planHistory[1].version, 2);
+
+    // Verify versioned plan artifact was saved on disk
+    const planArtifact = orchestrator.artifactStore.getPlan(2);
+    assert.ok(planArtifact, 'plan_v2.json artifact must be persisted');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

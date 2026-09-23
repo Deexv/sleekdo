@@ -15,10 +15,37 @@ export class SnapshotEngine {
     const files = this.fsEngine.scanWorkspace();
     const gitInfo = this.gitEngine.getQuickSummary();
 
+    // Extract dependencies from package.json if present
+    const dependencies: Record<string, string> = {};
+    const pkgContent = this.fsEngine.readFile('package.json');
+    if (pkgContent) {
+      try {
+        const pkg = JSON.parse(pkgContent);
+        const allDeps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+        for (const [k, v] of Object.entries(allDeps)) {
+          dependencies[k] = String(v);
+        }
+      } catch {
+        // Ignore invalid package.json
+      }
+    }
+
+    // Extract configuration files
+    const configurationFiles: Record<string, string> = {};
+    const configRegex = /^(?:tsconfig.*\.json|package\.json|\.env.*|.*\.config\..*|Dockerfile|docker-compose.*|\.gitignore|sleekdo\.config\.json)$/i;
+    for (const [filePath, meta] of Object.entries(files)) {
+      const baseName = filePath.split('/').pop() || filePath;
+      if (configRegex.test(baseName) || filePath.includes('.config/')) {
+        configurationFiles[filePath] = meta.sha256;
+      }
+    }
+
     const snapshotId = id || `snap_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     return {
       id: snapshotId,
       timestamp: Date.now(),
+      dependencies,
+      configurationFiles,
       files,
       gitCommit: gitInfo.commit,
       gitStatusSummary: gitInfo.statusSummary,
@@ -52,6 +79,40 @@ export class SnapshotEngine {
       }
     }
 
+    // Calculate changed dependencies
+    const changedDependencies: string[] = [];
+    const beforeDeps = before.dependencies || {};
+    const afterDeps = after.dependencies || {};
+    for (const [dep, ver] of Object.entries(afterDeps)) {
+      if (!(dep in beforeDeps)) {
+        changedDependencies.push(`added: ${dep}@${ver}`);
+      } else if (beforeDeps[dep] !== ver) {
+        changedDependencies.push(`updated: ${dep} (${beforeDeps[dep]} -> ${ver})`);
+      }
+    }
+    for (const dep of Object.keys(beforeDeps)) {
+      if (!(dep in afterDeps)) {
+        changedDependencies.push(`removed: ${dep}`);
+      }
+    }
+
+    // Calculate changed configuration
+    const changedConfiguration: string[] = [];
+    const beforeConfigs = before.configurationFiles || {};
+    const afterConfigs = after.configurationFiles || {};
+    for (const [cfg, sha] of Object.entries(afterConfigs)) {
+      if (!(cfg in beforeConfigs)) {
+        changedConfiguration.push(`created: ${cfg}`);
+      } else if (beforeConfigs[cfg] !== sha) {
+        changedConfiguration.push(`modified: ${cfg}`);
+      }
+    }
+    for (const cfg of Object.keys(beforeConfigs)) {
+      if (!(cfg in afterConfigs)) {
+        changedConfiguration.push(`deleted: ${cfg}`);
+      }
+    }
+
     // Extract directories
     const extractDirs = (fileList: string[]): string[] => {
       const dirs = new Set<string>();
@@ -73,6 +134,8 @@ export class SnapshotEngine {
       deletedFiles: deletedFiles.sort(),
       createdDirectories: extractDirs(createdFiles).sort(),
       deletedDirectories: extractDirs(deletedFiles).sort(),
+      changedDependencies: changedDependencies.sort(),
+      changedConfiguration: changedConfiguration.sort(),
     };
   }
 }

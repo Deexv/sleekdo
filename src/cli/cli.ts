@@ -67,6 +67,11 @@ export async function runCli(args: string[]): Promise<void> {
       const approved = tasks.filter((t) => t.status === 'APPROVED').length;
       console.log(`Tasks Approved: ${approved}/${tasks.length}`);
       console.log(`Requirements Satisfied: ${Object.values(state.requirements).filter((r) => r.status === 'satisfied').length}/${Object.keys(state.requirements).length}`);
+      const blockedTasks = tasks.filter((t) => t.status === 'BLOCKED');
+      console.log(`Blocking Work: ${blockedTasks.length} blocked task(s)`);
+      for (const b of blockedTasks) {
+        console.log(`  - [BLOCKED] ${b.id}: ${b.title}`);
+      }
       console.log(`Active Investigations: ${Object.values(state.investigations).filter((i) => i.status === 'active').length}`);
       console.log(`Cleanup Findings: ${state.cleanupFindings.length}`);
       break;
@@ -162,14 +167,12 @@ export async function runCli(args: string[]): Promise<void> {
     case 'replan': {
       const reason = args.slice(1).join(' ') || 'User requested replanning';
       console.log(`[Sleekdo] Requesting replan: ${reason}`);
-      const reassessment = await orchestrator.planner.reassessProject(orchestrator.stateStore.getState());
-      orchestrator.eventStore.appendEvent(
-        orchestrator.stateStore.getRevision(),
-        'PLAN_REVISED',
-        'USER',
-        { reason, reassessment }
-      );
-      console.log('[Sleekdo] Reassessment complete.');
+      const success = await orchestrator.handleRequirementChange(reason);
+      if (success) {
+        console.log('[Sleekdo] Re-planning complete. Revised plan approved by A3.');
+      } else {
+        console.log('[Sleekdo] Revised plan was rejected by A3. Check event logs.');
+      }
       break;
     }
 

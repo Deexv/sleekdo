@@ -177,6 +177,8 @@ export interface Investigation {
 export interface WorkspaceSnapshot {
   id: SnapshotId;
   timestamp: number;
+  dependencies?: Record<string, string>;
+  configurationFiles?: Record<string, string>;
   files: Record<string, { size: number; sha256: string }>;
   gitCommit?: string;
   gitStatusSummary?: string;
@@ -191,6 +193,8 @@ export interface WorkspaceDiff {
   deletedFiles: string[];
   createdDirectories: string[];
   deletedDirectories: string[];
+  changedDependencies: string[];
+  changedConfiguration: string[];
 }
 
 export type EventType =

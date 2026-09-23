@@ -91,3 +91,49 @@ test('SchemaValidator: validates review decisions and mandates concrete evidence
   const resConcrete = SchemaValidator.validateReview(concreteReject);
   assert.equal(resConcrete.valid, true);
 });
+
+test('A3Reviewer: retries on invalid schema output and escalates to BLOCK on repeated failure (PRD Section 87)', async () => {
+  const { MockAdapter } = await import('../../dist/adapters/mock-adapter.js');
+  const { A3Reviewer } = await import('../../dist/roles/a3-reviewer.js');
+
+  const mockAdapter = new MockAdapter();
+  // Handler 1: invalid output (no JSON)
+  mockAdapter.addHandler(async (_input, _session, emit) => {
+    emit({ type: 'message', timestamp: Date.now(), data: { text: 'I think this work looks good.' } });
+  });
+  // Handler 2: invalid output (malformed JSON)
+  mockAdapter.addHandler(async (_input, _session, emit) => {
+    emit({ type: 'message', timestamp: Date.now(), data: { text: '{"decision": "INVALID_STATE"}' } });
+  });
+  // Handler 3: invalid output (gibberish)
+  mockAdapter.addHandler(async (_input, _session, emit) => {
+    emit({ type: 'message', timestamp: Date.now(), data: { text: 'Still not valid JSON.' } });
+  });
+
+  const reviewer = new A3Reviewer(mockAdapter, process.cwd());
+  const reviewResult = await reviewer.reviewTask({
+    originalRequest: 'Test objective',
+    task: {
+      id: 'task_001',
+      parentId: null,
+      type: 'task',
+      title: 'T1',
+      objective: 'O1',
+      requirements: ['req_1'],
+      acceptanceCriteria: ['C1'],
+      dependencies: [],
+      status: 'AWAITING_REVIEW',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+    acceptanceCriteria: ['C1'],
+    sleekdoStateRevision: 1,
+    a1Summary: 'Done work',
+    diffSummary: { createdFiles: [], modifiedFiles: [], deletedFiles: [] },
+    gitDiff: '',
+    relevantFileContents: {},
+  }, 'sha123');
+
+  assert.equal(reviewResult.decision, 'BLOCK');
+  assert.ok(reviewResult.summary.includes('repeatedly failed schema validation'));
+});

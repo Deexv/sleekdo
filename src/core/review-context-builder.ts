@@ -11,6 +11,8 @@ export interface ReviewContext {
     createdFiles: string[];
     modifiedFiles: string[];
     deletedFiles: string[];
+    changedDependencies?: string[];
+    changedConfiguration?: string[];
   };
   gitDiff: string;
   testResultsSummary?: string;
@@ -61,6 +63,8 @@ export class ReviewContextBuilder {
         createdFiles: diff.createdFiles,
         modifiedFiles: diff.modifiedFiles,
         deletedFiles: diff.deletedFiles,
+        changedDependencies: diff.changedDependencies,
+        changedConfiguration: diff.changedConfiguration,
       },
       gitDiff: this.redactSecrets(gitDiff),
       testResultsSummary: testResultsSummary ? this.redactSecrets(testResultsSummary) : undefined,

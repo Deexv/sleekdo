@@ -66,4 +66,22 @@ export class ArtifactStore {
     if (!fs.existsSync(filePath)) return null;
     return fs.readFileSync(filePath);
   }
+
+  public savePlan(version: number, planData: unknown): string {
+    const plansDir = path.join(this.sleekdoDir, 'plans');
+    if (!fs.existsSync(plansDir)) {
+      fs.mkdirSync(plansDir, { recursive: true });
+    }
+    const filename = `plan_v${version}.json`;
+    const filePath = path.join(plansDir, filename);
+    fs.writeFileSync(filePath, JSON.stringify(planData, null, 2), 'utf8');
+    return filePath;
+  }
+
+  public getPlan(version: number): unknown | null {
+    const plansDir = path.join(this.sleekdoDir, 'plans');
+    const filePath = path.join(plansDir, `plan_v${version}.json`);
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  }
 }

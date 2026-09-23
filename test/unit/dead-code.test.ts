@@ -43,3 +43,53 @@ test('DeadFileAnalyzer: detects CONFIRMED_DEAD vs DYNAMICALLY_REFERENCED files',
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('DependencyAnalyzer: detects unused and duplicate dependencies', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sleekdo-dep-test-'));
+  try {
+    fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+
+    // package.json with used, unused, and duplicate dependencies
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify(
+        {
+          dependencies: {
+            express: '^4.18.2',
+            lodash: '^4.17.21',
+            zod: '^3.22.0',
+          },
+          devDependencies: {
+            zod: '^3.22.0',
+            typescript: '^5.0.0',
+          },
+        },
+        null,
+        2
+      )
+    );
+
+    // Source code only importing express
+    fs.writeFileSync(
+      path.join(tmpDir, 'src', 'server.ts'),
+      "import express from 'express';\nconst app = express();"
+    );
+
+    const fsEngine = new FilesystemEngine(tmpDir);
+    const analyzer = new DeadCodeAnalyzer(tmpDir, fsEngine);
+    const results = analyzer.analyzeAll();
+
+    const lodashDead = results.find((r) => r.symbol === 'lodash' && r.type === 'dependency');
+    assert.ok(lodashDead, 'Unused dependency lodash should be detected');
+    assert.equal(lodashDead.classification, 'PROBABLY_DEAD');
+
+    const zodDuplicate = results.find((r) => r.symbol === 'zod' && r.type === 'dependency');
+    assert.ok(zodDuplicate, 'Duplicate dependency zod should be detected');
+    assert.equal(zodDuplicate.classification, 'CONFIRMED_DEAD');
+
+    const expressResult = results.find((r) => r.symbol === 'express' && r.type === 'dependency');
+    assert.equal(expressResult, undefined, 'Used dependency express must not be flagged as dead');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -25,5 +25,6 @@ export * from './roles/a2-planner.js';
 export * from './roles/a3-reviewer.js';
 export * from './analysis/dead-code-analyzer.js';
 export * from './analysis/dead-file-analyzer.js';
+export * from './analysis/dependency-analyzer.js';
 export * from './validation/schemas.js';
 export * from './config/config.js';

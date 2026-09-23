@@ -20,7 +20,7 @@ import { AgentAdapter } from '../adapters/agent-adapter.js';
 import { A1Worker } from '../roles/a1-worker.js';
 import { A2Planner } from '../roles/a2-planner.js';
 import { A3Reviewer } from '../roles/a3-reviewer.js';
-import { Task, TaskId, TaskStatus, ReviewResult, SleekdoState } from '../types/domain.js';
+import { Task, TaskId, TaskStatus, ReviewResult, SleekdoState, RequirementId, TaskRejection } from '../types/domain.js';
 
 export interface OrchestratorOptions {
   workspaceDir: string;
@@ -211,6 +211,147 @@ export class Orchestrator {
     });
   }
 
+  public async handleRequirementChange(newRequest: string): Promise<boolean> {
+    const prevRevision = this.stateStore.getRevision();
+    this.eventStore.appendEvent(
+      prevRevision,
+      'USER_REQUEST',
+      'USER',
+      { change: 'Requirement changed mid-development', newRequest }
+    );
+
+    this.stateStore.updateState((draft) => {
+      draft.originalRequest = newRequest;
+    });
+
+    // 1. A2 Reassessment
+    const currentState = this.stateStore.getState();
+    const reassessment = await this.planner.reassessProject(currentState);
+
+    // 2. Impact Analysis
+    const currentTasks = Object.values(currentState.tasks);
+    const affectedTaskIds: TaskId[] = [];
+    const affectedReqIds: RequirementId[] = [];
+
+    for (const obsId of reassessment.obsoleteTaskIds || []) {
+      if (currentState.tasks[obsId]) {
+        affectedTaskIds.push(obsId);
+      }
+    }
+
+    for (const req of reassessment.newlyDiscoveredRequirements || []) {
+      affectedReqIds.push(req.id);
+    }
+
+    for (const task of reassessment.newTasks || []) {
+      affectedTaskIds.push(task.id);
+    }
+
+    // 3. Prepare revised plan for A3 verification
+    const revisedPlan = {
+      userRequest: newRequest,
+      existingTasks: currentTasks.map((t) => ({ id: t.id, status: t.status, title: t.title })),
+      newTasks: reassessment.newTasks,
+      obsoleteTasks: reassessment.obsoleteTaskIds,
+      newRequirements: reassessment.newlyDiscoveredRequirements,
+      reason: reassessment.reason,
+    };
+
+    // 4. A3 verifies revised plan (PRD Section 78)
+    const review = await this.reviewer.reviewPlan(JSON.stringify(revisedPlan, null, 2));
+    if (!review.approved) {
+      this.eventStore.appendEvent(
+        this.stateStore.getRevision(),
+        'PLAN_REJECTED',
+        'A3',
+        { reason: review.reason }
+      );
+      return false;
+    }
+
+    // 5. Update requirements and tasks in state
+    const newVersion = currentState.planVersion + 1;
+    this.stateStore.updateState((draft) => {
+      draft.planVersion = newVersion;
+
+      for (const obsId of reassessment.obsoleteTaskIds || []) {
+        if (draft.tasks[obsId]) {
+          draft.tasks[obsId].status = 'REJECTED';
+          draft.tasks[obsId].rejectionHistory = draft.tasks[obsId].rejectionHistory || [];
+          draft.tasks[obsId].rejectionHistory!.push({
+            reviewId: `rev_obsolete_${Date.now()}`,
+            timestamp: Date.now(),
+            problem: 'Task declared obsolete by requirement change',
+            evidence: 'Requirement change impact analysis (PRD Section 78)',
+            affectedRequirement: draft.tasks[obsId].requirements[0] || 'Unknown',
+            requiredCorrection: 'None (obsolete)',
+            verificationCriteria: 'Obsolete task cancelled',
+          });
+        }
+      }
+
+      for (const req of reassessment.newlyDiscoveredRequirements || []) {
+        if (!draft.requirements[req.id]) {
+          draft.requirements[req.id] = {
+            id: req.id,
+            description: req.description,
+            source: 'implementation_discovery',
+            status: 'pending',
+            taskIds: [],
+            verificationCriteria: req.verificationCriteria,
+          };
+        }
+      }
+
+      for (const t of reassessment.newTasks || []) {
+        if (!draft.tasks[t.id]) {
+          draft.tasks[t.id] = {
+            id: t.id,
+            parentId: null,
+            type: t.type || 'task',
+            title: t.title,
+            objective: t.objective,
+            requirements: t.requirements,
+            acceptanceCriteria: t.acceptanceCriteria,
+            dependencies: t.dependencies,
+            status: t.dependencies.length === 0 ? 'READY' : 'PENDING',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+
+          for (const reqId of t.requirements) {
+            if (draft.requirements[reqId] && !draft.requirements[reqId].taskIds.includes(t.id)) {
+              draft.requirements[reqId].taskIds.push(t.id);
+            }
+          }
+        }
+      }
+
+      draft.planHistory = draft.planHistory || [];
+      draft.planHistory.push({
+        version: newVersion,
+        timestamp: Date.now(),
+        reason: reassessment.reason || 'User requirement changed',
+        changesSummary: `Impact: ${affectedTaskIds.length} tasks and ${affectedReqIds.length} requirements affected.`,
+        affectedRequirements: affectedReqIds,
+        affectedTasks: affectedTaskIds,
+        approvalState: 'approved',
+      });
+    });
+
+    // Save versioned plan artifact
+    this.artifactStore.savePlan(newVersion, revisedPlan);
+
+    this.eventStore.appendEvent(
+      this.stateStore.getRevision(),
+      'PLAN_REVISED',
+      'A2',
+      { version: newVersion, changesSummary: revisedPlan }
+    );
+
+    return true;
+  }
+
   public async runToCompletion(): Promise<boolean> {
     let iteration = 0;
 
@@ -385,6 +526,55 @@ export class Orchestrator {
       const finalSnapshot = this.snapshotEngine.captureSnapshot();
       this.artifactStore.saveSnapshot(finalSnapshot);
       const diff = this.snapshotEngine.calculateDiff(baselineSnapshot, finalSnapshot);
+
+      // Enforce Workspace Isolation (PRD Section 48)
+      const unauthorizedMutations = [...diff.createdFiles, ...diff.modifiedFiles, ...diff.deletedFiles]
+        .filter((f) => f.startsWith('.sleekdo/') || f === '.sleekdo');
+
+      if (unauthorizedMutations.length > 0) {
+        this.eventStore.appendEvent(
+          this.stateStore.getRevision(),
+          'TASK_REJECTED',
+          'ORCHESTRATOR',
+          {
+            taskId,
+            reason: `Workspace isolation violation: A1 mutated protected Sleekdo control files: ${unauthorizedMutations.join(', ')}`,
+          },
+          taskId
+        );
+
+        const isolationViolationReview: ReviewResult = {
+          id: `rev_isolation_${Date.now()}`,
+          taskId,
+          stateRevision: this.stateStore.getRevision(),
+          workspaceSnapshotSha: finalSnapshot.gitCommit || 'fs_snapshot',
+          reviewerProvider: 'orchestrator',
+          reviewerModel: 'workspace-guard',
+          startedAt: Date.now(),
+          completedAt: Date.now(),
+          decision: 'REJECT',
+          summary: `Workspace isolation violation: A1 attempted to write to protected control directory .sleekdo/ (${unauthorizedMutations.join(', ')}).`,
+          requirementCompliance: false,
+          acceptanceCriteriaMet: false,
+          implementationExists: false,
+          testsPass: false,
+          noRegressions: false,
+          scopeControlled: false,
+          noDeadCodeIntroduced: true,
+          blockingIssues: [
+            {
+              description: `A1 modified protected control files: ${unauthorizedMutations.join(', ')}`,
+              evidence: unauthorizedMutations[0],
+              affectedRequirement: task.requirements[0] || 'PRD Section 48',
+              requiredFix: 'Do not modify files inside .sleekdo/. Sleekdo control state is immutable to worker agents.',
+              verification: 'Check that .sleekdo directory is untouched by task execution.',
+            },
+          ],
+        };
+
+        this.handleTaskRejection(taskId, isolationViolationReview);
+        return;
+      }
 
       // Collect git diff and test evidence
       const gitDiff = this.gitEngine.getDiff();

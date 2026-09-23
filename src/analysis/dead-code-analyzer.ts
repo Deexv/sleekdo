@@ -2,22 +2,26 @@ import * as path from 'node:path';
 import { DeadCodeItem } from '../types/domain.js';
 import { FilesystemEngine } from '../evidence/filesystem-engine.js';
 import { DeadFileAnalyzer } from './dead-file-analyzer.js';
+import { DependencyAnalyzer } from './dependency-analyzer.js';
 
 export class DeadCodeAnalyzer {
   private readonly workspaceDir: string;
   private readonly fsEngine: FilesystemEngine;
   private readonly deadFileAnalyzer: DeadFileAnalyzer;
+  private readonly dependencyAnalyzer: DependencyAnalyzer;
 
   constructor(workspaceDir: string, fsEngine: FilesystemEngine) {
     this.workspaceDir = workspaceDir;
     this.fsEngine = fsEngine;
     this.deadFileAnalyzer = new DeadFileAnalyzer(workspaceDir, fsEngine);
+    this.dependencyAnalyzer = new DependencyAnalyzer(workspaceDir, fsEngine);
   }
 
   public analyzeAll(): DeadCodeItem[] {
     const fileItems = this.deadFileAnalyzer.analyze();
     const symbolItems = this.analyzeSymbols();
-    return [...fileItems, ...symbolItems];
+    const depItems = this.dependencyAnalyzer.analyzeDependencies();
+    return [...fileItems, ...symbolItems, ...depItems];
   }
 
   private analyzeSymbols(): DeadCodeItem[] {
