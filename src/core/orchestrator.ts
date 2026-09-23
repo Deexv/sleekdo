@@ -154,13 +154,19 @@ export class Orchestrator {
     }
 
     const state = this.stateStore.getState();
-    if (state.originalRequest && state.status !== 'INITIALIZING' && state.status !== 'FAILED') {
-      // Already initialized, resume existing project
+    const hasTasks = Object.keys(state.tasks).length > 0;
+    if (hasTasks && state.originalRequest && state.status !== 'INITIALIZING' && state.status !== 'FAILED') {
+      // Already initialized with a viable plan, resume existing project
       return;
     }
 
+    const effectiveRequest = userRequest || state.originalRequest;
+    if (!effectiveRequest) {
+      throw new Error('No user request provided for project initialization');
+    }
+
     this.stateStore.updateState((draft) => {
-      draft.originalRequest = userRequest;
+      draft.originalRequest = effectiveRequest;
       draft.status = 'PLANNING';
     });
 
@@ -168,13 +174,13 @@ export class Orchestrator {
       this.stateStore.getRevision(),
       'USER_REQUEST',
       'USER',
-      { request: userRequest }
+      { request: effectiveRequest }
     );
 
     this.notifyProgress({ phase: 'planning', message: 'Sleekdo is planning...' });
 
     // 2. A2 creates initial plan
-    const initialPlan = await this.planner.createInitialPlan(userRequest);
+    const initialPlan = await this.planner.createInitialPlan(effectiveRequest);
     this.notifyProgress({ phase: 'plan_created', message: 'Initial plan created' });
     this.eventStore.appendEvent(
       this.stateStore.getRevision(),
@@ -405,6 +411,11 @@ export class Orchestrator {
   public async runToCompletion(): Promise<boolean> {
     let iteration = 0;
 
+    const initialState = this.stateStore.getState();
+    if (Object.keys(initialState.tasks).length === 0 && initialState.originalRequest) {
+      await this.initialize(initialState.originalRequest);
+    }
+
     while (iteration < this.maxIterations) {
       iteration++;
 
@@ -422,6 +433,7 @@ export class Orchestrator {
 
       if (!nextTask) {
         // No ready task found. Run recursive reassessment or check completion
+        this.notifyProgress({ phase: 'reassessing', message: 'Reassessing remaining project tasks...' });
         const reassessment = await this.planner.reassessProject(this.stateStore.getState());
         this.eventStore.appendEvent(
           this.stateStore.getRevision(),
@@ -474,10 +486,9 @@ export class Orchestrator {
           return true;
         } else {
           // If tasks exist but are blocked or unapproved, pause or fail gracefully
-          const anyPending = Object.values(this.stateStore.getState().tasks).some(
-            (t) => t.status !== 'APPROVED'
-          );
-          if (!anyPending && !finalVerification.isComplete) {
+          const allTasks = Object.values(this.stateStore.getState().tasks);
+          const anyPending = allTasks.some((t) => t.status !== 'APPROVED');
+          if (allTasks.length > 0 && !anyPending && !finalVerification.isComplete) {
             // Need remediation tasks for missing checks
             this.createRemediationForVerificationGap(finalVerification);
             continue;

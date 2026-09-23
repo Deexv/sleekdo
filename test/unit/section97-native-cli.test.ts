@@ -353,5 +353,38 @@ describe('Section 97: Sleekdo-native CLI and interactive interface', () => {
       await session.executeCommand('logs');
       assert.ok(out.output.includes('Recent Events'));
     });
+
+    it('automatically initializes and plans when run is executed on an uncompleted project without tasks', async () => {
+      const out = new StringWritable();
+      const stateStore = new StateStore(tmpDir);
+
+      // Pre-seed an uncompleted state where request exists but planning aborted
+      stateStore.updateState((draft) => {
+        draft.originalRequest = 'Build a game project';
+        draft.status = 'PLAN_REVIEW';
+        draft.tasks = {};
+      });
+
+      const { workerAdapter, plannerAdapter, reviewerAdapter } = setupMockAdapters(tmpDir);
+
+      const session = new InteractiveCliSession({
+        workspaceDir: tmpDir,
+        agentName: 'MockAgent',
+        workerAdapter,
+        plannerAdapter,
+        reviewerAdapter,
+        output: out,
+      });
+
+      // Type run directly
+      const contRun = await session.executeCommand('run');
+      assert.strictEqual(contRun, true);
+
+      // Verify that planning ran and project reached completion
+      assert.ok(out.output.includes('Initializing project with request'));
+      const finalState = new StateStore(tmpDir).getState();
+      assert.strictEqual(finalState.status, 'COMPLETE');
+      assert.ok(Object.keys(finalState.tasks).length > 0);
+    });
   });
 });

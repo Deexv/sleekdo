@@ -52,7 +52,7 @@ export class A1Worker {
           const text = String(ev.data.delta || ev.data.text || '');
           summaryText += text;
           rawOutput += text;
-        } else if (ev.type === 'turn_completed' && ev.data.rawOutput) {
+        } else if (ev.type === 'turn_completed' && ev.data.rawOutput && !rawOutput) {
           rawOutput += String(ev.data.rawOutput);
         }
       }

@@ -263,6 +263,10 @@ export class InteractiveCliSession {
         this.print('[Sleekdo] Running autonomous development cycle...');
         this.isRunning = true;
         try {
+          const state = this.stateStore.getState();
+          if (Object.keys(state.tasks).length === 0 && state.originalRequest) {
+            await this.handleBuildRequest(state.originalRequest);
+          }
           const completed = await this.orchestrator.runToCompletion();
           if (completed) {
             this.print('[Sleekdo] Complete: Project is fully built and verified.');
@@ -415,14 +419,21 @@ export class InteractiveCliSession {
       terminal: false,
     });
 
-    // If project is not yet initialized, prompt for objective directly
-    if (!state.originalRequest) {
-      this.print('\nWhat do you want to build?\n');
-      const answer = await new Promise<string>((resolve) => {
-        this.rl?.question('> ', (ans) => resolve(ans));
-      });
-      if (answer && answer.trim()) {
-        await this.handleBuildRequest(answer.trim());
+    // If project is not yet initialized or has no tasks, prompt for objective or resume planning
+    const hasTasks = Object.keys(state.tasks).length > 0;
+    if (!state.originalRequest || !hasTasks) {
+      if (!state.originalRequest) {
+        this.print('\nWhat do you want to build?\n');
+        const answer = await new Promise<string>((resolve) => {
+          this.rl?.question('> ', (ans) => resolve(ans));
+        });
+        if (answer && answer.trim()) {
+          await this.handleBuildRequest(answer.trim());
+        }
+      } else {
+        this.print(`\nLoaded active project: "${state.originalRequest}"`);
+        this.print('Planning tasks for project...');
+        await this.handleBuildRequest(state.originalRequest);
       }
     } else {
       this.print(`\nLoaded active project: "${state.originalRequest}"`);
