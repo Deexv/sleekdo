@@ -195,6 +195,19 @@ export class Orchestrator {
           }
         }
       }
+
+      draft.planVersion = 1;
+      draft.planHistory = [
+        {
+          version: 1,
+          timestamp: Date.now(),
+          reason: 'Initial plan approved by A3',
+          changesSummary: `Created ${initialPlan.tasks.length} tasks and ${initialPlan.requirements.length} requirements`,
+          affectedRequirements: initialPlan.requirements.map((r) => r.id),
+          affectedTasks: initialPlan.tasks.map((t) => t.id),
+          approvalState: 'approved',
+        },
+      ];
     });
   }
 
@@ -204,8 +217,11 @@ export class Orchestrator {
     while (iteration < this.maxIterations) {
       iteration++;
 
-      // Check if project is already complete
+      // Check if project is paused by human override
       const currentState = this.stateStore.getState();
+      if (currentState.isPaused) {
+        return false;
+      }
       if (currentState.status === 'COMPLETE') {
         return true;
       }
@@ -615,6 +631,18 @@ export class Orchestrator {
           }
         }
       }
+
+      draft.planVersion = (draft.planVersion || 1) + 1;
+      if (!draft.planHistory) draft.planHistory = [];
+      draft.planHistory.push({
+        version: draft.planVersion,
+        timestamp: Date.now(),
+        reason: 'Recursive reassessment discovered new requirements and tasks',
+        changesSummary: `Added ${reassessment.newTasks.length} task(s) and ${reassessment.newlyDiscoveredRequirements.length} requirement(s)`,
+        affectedRequirements: reassessment.newlyDiscoveredRequirements.map((r) => r.id),
+        affectedTasks: reassessment.newTasks.map((t) => t.id),
+        approvalState: 'approved',
+      });
     });
   }
 

@@ -48,6 +48,7 @@ export class StateStore {
       originalRequest: '',
       status: 'INITIALIZING',
       planVersion: 1,
+      planHistory: [],
       currentTaskId: null,
       tasks: {},
       requirements: {},

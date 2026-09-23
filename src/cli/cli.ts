@@ -112,7 +112,97 @@ export async function runCli(args: string[]): Promise<void> {
       break;
     }
 
+    case 'pause': {
+      const stateStore = new StateStore(workspaceDir);
+      stateStore.updateState((draft) => {
+        draft.isPaused = true;
+      });
+      orchestrator.eventStore.appendEvent(
+        stateStore.getRevision(),
+        'HUMAN_OVERRIDE',
+        'USER',
+        { action: 'pause' }
+      );
+      console.log('[Sleekdo] Project execution paused by human override.');
+      break;
+    }
+
+    case 'resume': {
+      const stateStore = new StateStore(workspaceDir);
+      stateStore.updateState((draft) => {
+        draft.isPaused = false;
+      });
+      orchestrator.eventStore.appendEvent(
+        stateStore.getRevision(),
+        'HUMAN_OVERRIDE',
+        'USER',
+        { action: 'resume' }
+      );
+      console.log('[Sleekdo] Project execution resumed.');
+      break;
+    }
+
+    case 'clarify': {
+      const clarification = args.slice(1).join(' ');
+      if (!clarification) {
+        console.error('Usage: sleekdo clarify <clarification message>');
+        process.exit(1);
+      }
+      const stateStore = new StateStore(workspaceDir);
+      orchestrator.eventStore.appendEvent(
+        stateStore.getRevision(),
+        'HUMAN_OVERRIDE',
+        'USER',
+        { action: 'clarification', message: clarification }
+      );
+      console.log(`[Sleekdo] User clarification recorded: "${clarification}"`);
+      break;
+    }
+
+    case 'replan': {
+      const reason = args.slice(1).join(' ') || 'User requested replanning';
+      console.log(`[Sleekdo] Requesting replan: ${reason}`);
+      const reassessment = await orchestrator.planner.reassessProject(orchestrator.stateStore.getState());
+      orchestrator.eventStore.appendEvent(
+        orchestrator.stateStore.getRevision(),
+        'PLAN_REVISED',
+        'USER',
+        { reason, reassessment }
+      );
+      console.log('[Sleekdo] Reassessment complete.');
+      break;
+    }
+
+    case 'override': {
+      const taskId = args[1];
+      const action = args[2]?.toLowerCase();
+      if (!taskId || !['approve', 'reject', 'unblock'].includes(action)) {
+        console.error('Usage: sleekdo override <taskId> <approve|reject|unblock>');
+        process.exit(1);
+      }
+      const stateStore = new StateStore(workspaceDir);
+      stateStore.updateState((draft) => {
+        const task = draft.tasks[taskId];
+        if (!task) {
+          console.error(`Task ${taskId} not found.`);
+          process.exit(1);
+        }
+        if (action === 'approve') task.status = 'APPROVED';
+        else if (action === 'reject') task.status = 'REJECTED';
+        else if (action === 'unblock') task.status = 'READY';
+        task.updatedAt = Date.now();
+      });
+      orchestrator.eventStore.appendEvent(
+        stateStore.getRevision(),
+        'HUMAN_OVERRIDE',
+        'USER',
+        { taskId, action }
+      );
+      console.log(`[Sleekdo] Task ${taskId} status overridden to ${action.toUpperCase()} by user.`);
+      break;
+    }
+
     default:
-      console.log('Usage: sleekdo [init|run|status|verify|clean|inspect]');
+      console.log('Usage: sleekdo [init|run|status|verify|clean|inspect|pause|resume|clarify|replan|override]');
   }
 }

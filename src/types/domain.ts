@@ -241,12 +241,24 @@ export interface SleekdoEvent {
   data: Record<string, unknown>;
 }
 
+export interface PlanVersionRecord {
+  version: number;
+  timestamp: number;
+  reason: string;
+  changesSummary: string;
+  affectedRequirements: RequirementId[];
+  affectedTasks: TaskId[];
+  approvalState: 'approved' | 'rejected' | 'pending';
+}
+
 export interface SleekdoState {
   revision: number;
   projectId: string;
   originalRequest: string;
   status: ProjectStatus;
   planVersion: number;
+  planHistory?: PlanVersionRecord[];
+  isPaused?: boolean;
   currentTaskId: TaskId | null;
   activeSessionId?: string;
   workspaceLock?: {
@@ -269,3 +281,4 @@ export interface SleekdoState {
   };
   updatedAt: number;
 }
+
