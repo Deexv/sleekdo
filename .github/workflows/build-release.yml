@@ -59,6 +59,29 @@ jobs:
           mkdir -p dist
           powershell Compress-Archive -Path dist\* -DestinationPath dist/${{ matrix.name }}.zip
 
+      - name: Create binary
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            # Windows: create a simple batch file that invokes node
+            cat > dist/sleekdo << 'EOF'
+@echo off
+node "$(pwd)/dist/cli/cli.js" %*
+EOF
+            chmod +x dist/sleekdo
+          else
+            # Unix: create a shebang script
+            cat > dist/sleekdo << 'EOF'
+#!/usr/bin/env node
+import { runCli } from './cli/cli.js';
+
+runCli(process.argv.slice(2)).catch((err) => {
+  console.error('[Sleekdo Fatal Error]:', err);
+  process.exit(1);
+});
+EOF
+            chmod +x dist/sleekdo
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
