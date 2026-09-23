@@ -60,7 +60,7 @@ jobs:
       - name: Create zip (Windows)
         if: runner.os == 'Windows'
         run: |
-          mkdir -p dist
+          mkdir dist -Force
           powershell Compress-Archive -Path dist\sleekdo -DestinationPath dist\${{ matrix.name }}.zip
 
       - name: Upload artifact
