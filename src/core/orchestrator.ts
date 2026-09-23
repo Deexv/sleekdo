@@ -144,8 +144,11 @@ export class Orchestrator {
     const state = this.stateStore.getState();
     const tasks = Object.values(state.tasks);
     if (tasks.length === 0) return 0;
+    // Batch-review model: approved tasks count fully; executed-but-unreviewed
+    // tasks count half, so progress reflects real work before final approval.
     const approved = tasks.filter((t) => t.status === 'APPROVED').length;
-    return Math.round((approved / tasks.length) * 100);
+    const executed = tasks.filter((t) => t.status === 'AWAITING_REVIEW').length;
+    return Math.round(((approved + executed * 0.5) / tasks.length) * 100);
   }
 
   public notifyProgress(event: OrchestratorProgressEvent): void {
