@@ -14,17 +14,32 @@ Sleekdo organizes work around three logical AI roles coordinated by an authorita
 
 The central invariant governs all operations. A1 performs work. A2 determines what work must exist. A3 independently determines whether completed work is correct. The Sleekdo orchestrator controls what work proceeds. No agent approves its own output. No agent skips validation gates.
 
-## Quick start
+## Installation on a new computer
 
-### Prerequisites
+### 1. Install prerequisites
 
-- Node.js 18 or higher.
-- npm.
-- At least one installed coding CLI agent, such as Pi CLI, Claude Code, or Agy.
+Ensure you have Node.js 18 or higher, npm, and git installed.
 
-### Installation and build
+Install at least one coding agent backend globally on your computer:
 
-Clone the repository and install dependencies:
+- **Pi CLI (recommended):**
+  ```bash
+  npm install -g @earendil-works/pi-coding-agent
+  ```
+  Configure your model provider in Pi before running Sleekdo.
+
+- **Claude Code:**
+  ```bash
+  npm install -g @anthropic-ai/claude-code
+  export ANTHROPIC_API_KEY="your-api-key"
+  ```
+
+- **Google Antigravity (Agy):**
+  Install the `agy` CLI binary and ensure it is available in your PATH.
+
+### 2. Clone and install Sleekdo
+
+Clone the repository and compile the TypeScript code:
 
 ```bash
 git clone https://github.com/Deexv/sleekdo.git
@@ -33,49 +48,97 @@ npm install
 npm run build
 ```
 
-Link the executable globally or run through Node.js:
+### 3. Link globally
+
+Link Sleekdo to your global npm bin directory:
 
 ```bash
 npm link
+```
+
+Verify that Sleekdo is globally available:
+
+```bash
 sleekdo --help
 ```
 
-### Native interactive mode (Section 97)
+---
 
-Per PRD Section 97, Sleekdo provides an interactive terminal session where Sleekdo owns the user-facing UI while controlling external agent CLIs as headless backends:
+## How to use Sleekdo on a new project
+
+### 1. Create a project directory
+
+Navigate to any directory where you want to build software:
 
 ```bash
-# Launch with Pi CLI backend
+mkdir my-new-project
+cd my-new-project
+```
+
+### 2. Launch with your chosen agent backend (recommended)
+
+Launch the native interactive terminal UI (Section 97) with your installed agent:
+
+```bash
+# With Pi CLI backend
 sleekdo --pi
-sleekdo pi
 
-# Launch with Google Antigravity backend
-sleekdo --agy
-sleekdo agy
-
-# Launch with Claude Code backend
+# With Claude Code backend
 sleekdo --claude
-sleekdo claude
+
+# With Google Antigravity backend
+sleekdo --agy
 ```
 
-### Basic batch workflow
+### 3. Enter your objective
 
-1. Initialize a new project with your objective:
+Type what you want to build when prompted:
 
-```bash
-sleekdo init "Create a high-performance REST API with authentication and rate limiting"
+```text
+╭──────────────────────────────────────────────╮
+│  SLEEKDO                                     │
+│  Agent: Pi                                   │
+│  Project: my-new-project                     │
+╰──────────────────────────────────────────────╯
+
+What do you want to build?
+
+> Create a complete REST API with authentication, SQLite storage, tests, and rate limiting.
 ```
 
-2. Execute the autonomous development cycle:
+Sleekdo plans the work, validates the plan with A3 Reviewer, and displays the task roadmap.
+
+### 4. Interactive session commands
+
+Inside the interactive prompt (`sleekdo>`), run these commands:
+
+- `run`. Starts the autonomous implementation and verification cycle.
+- `status`. Prints active state, requirement coverage, and blocked tasks.
+- `tasks`. Prints the current task breakdown with status symbols (`✓`, `→`, `○`, `✗`).
+- `plan`. Prints the decomposed plan and criteria.
+- `review <taskId>`. Shows the A3 review verdict and evidence for a specific task.
+- `retry <taskId>`. Resets a task to `READY` to retry execution.
+- `pause`. Pauses execution gracefully at task boundaries.
+- `resume`. Resumes paused execution.
+- `logs`. Displays recent audit events.
+- `exit` or `quit`. Closes the interactive terminal.
+
+### 5. Alternative: Batch mode workflow
+
+For headless scripting, run standard subcommands directly:
 
 ```bash
+# Initialize project with your prompt
+sleekdo init "Create a high-performance REST API with authentication"
+
+# Run the orchestrator loop to completion
 sleekdo run
-```
 
-3. Check live progress and requirement coverage:
-
-```bash
+# Inspect live progress and requirement coverage
 sleekdo status
+
+# Run system verification
+sleekdo verify
 ```
 
 ## CLI summary

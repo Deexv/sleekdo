@@ -13,6 +13,56 @@ Sleekdo supports two primary adapter implementations:
 1. [`PiAdapter`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/adapters/pi-adapter.ts). Tailored integration for Pi CLI with streaming event capture.
 2. [`GenericPTYAdapter`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/adapters/generic-pty-adapter.ts). Universal process adapter supporting Claude Code, Agy, Python scripts, shell scripts, and custom binaries.
 
+## Installing agent backends on a fresh computer
+
+Before running Sleekdo with an agent backend, install and authenticate that agent on your machine.
+
+### Pi CLI setup
+
+1. Install Pi CLI globally using npm:
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
+2. Configure your model provider in Pi before running Sleekdo.
+
+3. Verify that the `pi` command is executable in your terminal:
+
+```bash
+pi --version
+```
+
+### Claude Code setup
+
+1. Install Claude Code globally using npm:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+2. Export your Anthropic API key in your shell:
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+3. Verify that the `claude` command is executable:
+
+```bash
+claude --version
+```
+
+### Google Antigravity (Agy) setup
+
+1. Install the `agy` CLI utility and configure access.
+
+2. Verify that `agy` is available in your PATH:
+
+```bash
+agy --version
+```
+
 ## Fast launch commands (Section 97)
 
 Per PRD Section 97, Sleekdo provides instant launcher flags and subcommands that automatically bind the target agent backend:
