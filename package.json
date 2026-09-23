@@ -1,0 +1,30 @@
+{
+  "name": "sleekdo",
+  "version": "1.0.0",
+  "description": "Agent orchestration and verification system",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "sleekdo": "bin/sleekdo.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/unit/*.test.ts test/integration/*.test.ts",
+    "test:e2e": "node --experimental-strip-types --test test/e2e/pi-e2e.test.ts",
+    "test:all": "node --experimental-strip-types --test test/unit/*.test.ts test/integration/*.test.ts test/e2e/pi-e2e.test.ts",
+    "start": "node --experimental-strip-types bin/sleekdo.ts"
+  },
+  "keywords": [
+    "orchestrator",
+    "agent",
+    "verification",
+    "sleekdo"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

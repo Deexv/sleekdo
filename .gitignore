@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.sleekdo/
+*.tmp
+*.log
