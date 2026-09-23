@@ -2,6 +2,57 @@
 
 Sleekdo sits above coding CLI agents. It controls the development lifecycle around the coding agent through strict role contracts, evidence collection, and state invariants.
 
+## Key architectural decisions
+
+### Batch-review model
+
+Tasks are executed first, then reviewed in a single end-of-run batch. Each task receives a synthetic per-task review record, enabling traceability and the `review <taskId>` CLI command. This approach:
+
+- Reduces review overhead by reviewing all tasks at once
+- Provides per-task synthetic reviews for auditability
+- Enables the `/lockin` command to skip A3 plan review for faster refinement
+- Requires `AWAITING_REVIEW` as a satisfied dependency to prevent DependencyNotMetError
+
+### Command cache
+
+Tool-call results are memoized in the `CommandEngine`, preventing redundant `ls`, `find`, `read` calls. The cache:
+
+- Keyed by `(command, args, cwd)` for precision
+- Evicts oldest entries when exceeding 100 entries (LRU)
+- Reduces execution time by avoiding repeated subprocess spawns
+- Can be cleared with `clearCache()` when workspace changes
+
+### Live agent streaming
+
+Agent events (tool calls, message deltas, errors) stream in real-time to the CLI with:
+
+- Tool calls rendered as dim lines with file targets
+- A1 narration streamed with markdown formatting (bold, code, headings, bullets)
+- Idle loader appears when the agent goes quiet (600ms)
+- A2/A3 JSON suppressed to avoid noise
+- Spinner row yields before content prints to prevent overlap
+
+### Progress tracking
+
+Executed-but-unreviewed tasks count toward progress, so the bar reflects real work. The formula:
+
+```
+progress = (approved + executed * 0.5) / total
+```
+
+This prevents the progress bar from staying at 0% during batch review.
+
+### Design/anti-AI-slop review
+
+A3 batch reviewer includes explicit checks for:
+
+- Emoji-stuffed headers
+- Lorem ipsum placeholder text
+- Generic gradients and visual flourishes
+- Repeated generic phrases
+
+Tasks with slop are rejected and require remediation.
+
 ## The three logical AI roles
 
 Sleekdo delegates tasks to three logical AI roles coordinated by an authoritative orchestrator:
@@ -57,6 +108,10 @@ Sleekdo delegates tasks to three logical AI roles coordinated by an authoritativ
 - [`DeadCodeAnalyzer`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/analysis/dead-code-analyzer.ts). Parses TypeScript ASTs to detect unused exports and functions. Classifies items into confirmed dead, probably dead, or dynamically referenced.
 - [`DeadFileAnalyzer`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/analysis/dead-file-analyzer.ts). Scans project directories for unreferenced and orphaned files.
 - [`DependencyAnalyzer`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/analysis/dependency-analyzer.ts). Audits `package.json` against actual import statements to locate unused or missing dependencies.
+
+### 7. Command cache subsystem
+
+- [`CommandEngine`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/evidence/command-engine.ts). Executes diagnostic commands with a built-in cache. Memoizes tool-call results keyed by `(command, args, cwd)`. Evicts oldest entries when cache exceeds 100 entries. Reduces redundant `ls`, `find`, `read` calls and improves performance.
 
 ### 7. Validation and configuration subsystem
 

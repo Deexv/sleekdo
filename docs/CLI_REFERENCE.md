@@ -43,6 +43,10 @@ Inside the Sleekdo interactive prompt (`sleekdo>`), the following commands are a
 - `clean`. Runs dead-code, dead-file, and dependency analysis.
 - `verify`. Runs final 13-criteria system verification.
 - `exit` or `quit`. Closes the interactive session.
+- `/lockin`. Lock in the current objective and skip the A3 plan review for faster refinement.
+- `/lockin <objective>`. Update the objective and skip the A3 plan review.
+- `/lockin <objective> --continue`. Update the objective, skip A3 review, and continue running.
+- `/lockin <objective> --continue --resume`. Update the objective, skip A3 review, resume from paused state.
 
 ## Batch subcommands
 

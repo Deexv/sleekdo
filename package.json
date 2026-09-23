@@ -21,8 +21,25 @@
     "verification",
     "sleekdo"
   ],
-  "author": "",
+  "author": "Sleekdo Contributors",
   "license": "MIT",
+  "homepage": "https://github.com/Deexv/sleekdo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Deexv/sleekdo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Deexv/sleekdo/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"

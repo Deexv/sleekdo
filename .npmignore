@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Source files
+src/
+*.ts
+*.md
+!README.md
+!LICENSE
+
+# Tests
+test/
+*.test.ts
+*.test.js
+coverage/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts (we include dist)
+# dist/
+
+# Documentation (we include README.md)
+# docs/
+
+# Install script (not needed for npm package)
+install.sh
+
+# GitHub
+.github/
