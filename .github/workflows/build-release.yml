@@ -54,14 +54,20 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
-          tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            # macOS uses gzip directly
+            tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
+          else
+            # Linux uses gzip
+            tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
+          fi
           sha256sum dist/${{ matrix.name }}.tar.gz > dist/${{ matrix.name }}.tar.gz.sha256
 
       - name: Create zip (Windows)
         if: runner.os == 'Windows'
         run: |
           mkdir -p dist
-          powershell Compress-Archive -Path dist\* -DestinationPath dist/${{ matrix.name }}.zip
+          powershell Compress-Archive -Path dist\sleekdo -DestinationPath dist\${{ matrix.name }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
