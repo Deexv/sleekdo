@@ -100,6 +100,38 @@ export class SchemaValidator {
     }
     if (!Array.isArray(obj.newTasks)) {
       errors.push('newTasks must be an array');
+    } else {
+      obj.newTasks.forEach((t, i) => {
+        if (!t || typeof t !== 'object') {
+          errors.push(`newTasks[${i}] must be an object`);
+          return;
+        }
+        if (typeof t.id !== 'string' || !t.id) errors.push(`newTasks[${i}].id must be a non-empty string`);
+        if (typeof t.title !== 'string' || !t.title) errors.push(`newTasks[${i}].title must be a non-empty string`);
+        if (typeof t.objective !== 'string' || !t.objective) errors.push(`newTasks[${i}].objective must be a non-empty string`);
+        if (!Array.isArray(t.requirements)) errors.push(`newTasks[${i}].requirements must be an array`);
+        if (!Array.isArray(t.acceptanceCriteria)) errors.push(`newTasks[${i}].acceptanceCriteria must be an array`);
+        if (!Array.isArray(t.dependencies)) errors.push(`newTasks[${i}].dependencies must be an array`);
+      });
+    }
+    if (!Array.isArray(obj.newlyDiscoveredRequirements)) {
+      errors.push('newlyDiscoveredRequirements must be an array');
+    } else {
+      obj.newlyDiscoveredRequirements.forEach((r, i) => {
+        if (!r || typeof r !== 'object') {
+          errors.push(`newlyDiscoveredRequirements[${i}] must be an object`);
+          return;
+        }
+        if (typeof r.id !== 'string' || !r.id) errors.push(`newlyDiscoveredRequirements[${i}].id must be a non-empty string`);
+        if (typeof r.description !== 'string' || !r.description) errors.push(`newlyDiscoveredRequirements[${i}].description must be a non-empty string`);
+        if (!Array.isArray(r.verificationCriteria)) errors.push(`newlyDiscoveredRequirements[${i}].verificationCriteria must be an array`);
+      });
+    }
+    if (!Array.isArray(obj.obsoleteTaskIds)) {
+      errors.push('obsoleteTaskIds must be an array');
+    }
+    if (!Array.isArray(obj.defects)) {
+      errors.push('defects must be an array');
     }
     if (typeof obj.reason !== 'string' || !obj.reason) {
       errors.push('reason must be a non-empty string');

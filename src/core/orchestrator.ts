@@ -85,6 +85,7 @@ export class Orchestrator {
   private readonly testArgs?: string[];
   private readonly maxIterations: number;
   private rejectionCounts = new Map<TaskId, number>();
+  private autoRetryCounts = new Map<TaskId, number>();
 
   constructor(options: OrchestratorOptions) {
     this.workspaceDir = path.resolve(options.workspaceDir);
@@ -228,22 +229,24 @@ export class Orchestrator {
       }
 
       for (const t of initialPlan.tasks) {
+        const taskRequirements = Array.isArray(t.requirements) ? t.requirements : [];
+        const taskDependencies = Array.isArray(t.dependencies) ? t.dependencies : [];
         draft.tasks[t.id] = {
           id: t.id,
           parentId: null,
           type: t.type || 'task',
           title: t.title,
           objective: t.objective,
-          requirements: t.requirements,
-          acceptanceCriteria: t.acceptanceCriteria,
-          dependencies: t.dependencies,
-          status: t.dependencies.length === 0 ? 'READY' : 'PENDING',
+          requirements: taskRequirements,
+          acceptanceCriteria: Array.isArray(t.acceptanceCriteria) ? t.acceptanceCriteria : [],
+          dependencies: taskDependencies,
+          status: taskDependencies.length === 0 ? 'READY' : 'PENDING',
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
 
         // Link requirements
-        for (const reqId of t.requirements) {
+        for (const reqId of t.requirements || []) {
           if (draft.requirements[reqId] && !draft.requirements[reqId].taskIds.includes(t.id)) {
             draft.requirements[reqId].taskIds.push(t.id);
           }
@@ -360,22 +363,25 @@ export class Orchestrator {
       }
 
       for (const t of reassessment.newTasks || []) {
-        if (!draft.tasks[t.id]) {
+        if (!t || !t.id || draft.tasks[t.id]) continue;
+        {
+          const taskRequirements = Array.isArray(t.requirements) ? t.requirements : [];
+          const taskDependencies = Array.isArray(t.dependencies) ? t.dependencies : [];
           draft.tasks[t.id] = {
             id: t.id,
             parentId: null,
             type: t.type || 'task',
             title: t.title,
             objective: t.objective,
-            requirements: t.requirements,
-            acceptanceCriteria: t.acceptanceCriteria,
-            dependencies: t.dependencies,
-            status: t.dependencies.length === 0 ? 'READY' : 'PENDING',
+            requirements: taskRequirements,
+            acceptanceCriteria: Array.isArray(t.acceptanceCriteria) ? t.acceptanceCriteria : [],
+            dependencies: taskDependencies,
+            status: taskDependencies.length === 0 ? 'READY' : 'PENDING',
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };
 
-          for (const reqId of t.requirements) {
+          for (const reqId of t.requirements || []) {
             if (draft.requirements[reqId] && !draft.requirements[reqId].taskIds.includes(t.id)) {
               draft.requirements[reqId].taskIds.push(t.id);
             }
@@ -442,7 +448,8 @@ export class Orchestrator {
           reassessment as unknown as Record<string, unknown>
         );
 
-        if (reassessment.newTasks.length > 0) {
+        const newTasks = reassessment.newTasks || [];
+        if (newTasks.length > 0) {
           this.incorporateDiscoveredTasks(reassessment);
           continue;
         }
@@ -451,6 +458,11 @@ export class Orchestrator {
         this.cleanupManager.runSweep();
         const cleanupTasks = this.cleanupManager.generateCleanupTasks();
         if (cleanupTasks.length > 0) {
+          continue;
+        }
+
+        // Auto-recovery: retry stalled (BLOCKED/REJECTED) tasks before giving up
+        if (this.autoRetryStalledTasks()) {
           continue;
         }
 
@@ -502,6 +514,43 @@ export class Orchestrator {
     }
 
     return this.stateStore.getState().status === 'COMPLETE';
+  }
+
+  private autoRetryStalledTasks(): boolean {
+    const MAX_AUTO_RETRIES = 2;
+    const tasks = Object.values(this.stateStore.getState().tasks);
+    const stalled = tasks.filter(
+      (t) =>
+        (t.status === 'REJECTED' || t.status === 'BLOCKED') &&
+        (this.autoRetryCounts.get(t.id) || 0) < MAX_AUTO_RETRIES
+    );
+    if (stalled.length === 0) return false;
+
+    this.stateStore.updateState((draft) => {
+      for (const t of stalled) {
+        const dt = draft.tasks[t.id];
+        if (dt && (dt.status === 'REJECTED' || dt.status === 'BLOCKED')) {
+          dt.status = 'READY';
+          dt.updatedAt = Date.now();
+        }
+      }
+    });
+
+    for (const t of stalled) {
+      this.autoRetryCounts.set(t.id, (this.autoRetryCounts.get(t.id) || 0) + 1);
+      this.eventStore.appendEvent(
+        this.stateStore.getRevision(),
+        'AUTO_RETRY',
+        'ORCHESTRATOR',
+        { taskId: t.id, attempt: this.autoRetryCounts.get(t.id), reason: 'Run stalled with no ready tasks; auto-retrying' },
+        t.id
+      );
+      this.notifyProgress({
+        phase: 'reassessing',
+        message: `Auto-retrying stalled task ${t.id} (attempt ${this.autoRetryCounts.get(t.id)})`,
+      });
+    }
+    return true;
   }
 
   private selectNextAuthorizedTask(): Task | null {
@@ -721,7 +770,7 @@ export class Orchestrator {
       }
 
       // Check linked requirements
-      for (const reqId of t.requirements) {
+      for (const reqId of t.requirements || []) {
         const req = draft.requirements[reqId];
         if (req) {
           const allReqTasksApproved = req.taskIds.every((id) => draft.tasks[id]?.status === 'APPROVED');
@@ -870,37 +919,47 @@ export class Orchestrator {
       type?: string;
     }>;
   }): void {
+    const newlyDiscoveredRequirements = (reassessment.newlyDiscoveredRequirements ?? []).filter(
+      (r: any): r is { id: string; description: string; verificationCriteria: string[] } =>
+        r && typeof r === 'object' && typeof r.id === 'string' && r.id
+    );
+    const newTasks = (reassessment.newTasks ?? []).filter(
+      (t: any): t is { id: string; title: string; objective: string; requirements: string[]; acceptanceCriteria: string[]; dependencies: string[]; type?: string } =>
+        t && typeof t === 'object' && typeof t.id === 'string' && t.id
+    );
     this.stateStore.updateState((draft) => {
-      for (const req of reassessment.newlyDiscoveredRequirements) {
-        if (!draft.requirements[req.id]) {
-          draft.requirements[req.id] = {
-            id: req.id,
-            description: req.description,
-            source: 'implementation_discovery',
-            status: 'pending',
-            taskIds: [],
-            verificationCriteria: req.verificationCriteria,
-          };
-        }
+      for (const req of newlyDiscoveredRequirements) {
+        if (!req || !req.id || draft.requirements[req.id]) continue;
+        draft.requirements[req.id] = {
+          id: req.id,
+          description: req.description,
+          source: 'implementation_discovery',
+          status: 'pending',
+          taskIds: [],
+          verificationCriteria: Array.isArray(req.verificationCriteria) ? req.verificationCriteria : [],
+        };
       }
 
-      for (const t of reassessment.newTasks) {
-        if (!draft.tasks[t.id]) {
+      for (const t of newTasks) {
+        if (!t || !t.id || draft.tasks[t.id]) continue;
+        {
+          const requirements = Array.isArray(t.requirements) ? t.requirements : [];
+          const dependencies = Array.isArray(t.dependencies) ? t.dependencies : [];
           draft.tasks[t.id] = {
             id: t.id,
             parentId: null,
             type: (t.type as any) || 'task',
             title: t.title,
             objective: t.objective,
-            requirements: t.requirements,
-            acceptanceCriteria: t.acceptanceCriteria,
-            dependencies: t.dependencies,
-            status: t.dependencies.length === 0 ? 'READY' : 'PENDING',
+            requirements,
+            acceptanceCriteria: Array.isArray(t.acceptanceCriteria) ? t.acceptanceCriteria : [],
+            dependencies,
+            status: dependencies.length === 0 ? 'READY' : 'PENDING',
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };
 
-          for (const reqId of t.requirements) {
+          for (const reqId of requirements) {
             if (draft.requirements[reqId] && !draft.requirements[reqId].taskIds.includes(t.id)) {
               draft.requirements[reqId].taskIds.push(t.id);
             }
@@ -914,9 +973,9 @@ export class Orchestrator {
         version: draft.planVersion,
         timestamp: Date.now(),
         reason: 'Recursive reassessment discovered new requirements and tasks',
-        changesSummary: `Added ${reassessment.newTasks.length} task(s) and ${reassessment.newlyDiscoveredRequirements.length} requirement(s)`,
-        affectedRequirements: reassessment.newlyDiscoveredRequirements.map((r) => r.id),
-        affectedTasks: reassessment.newTasks.map((t) => t.id),
+        changesSummary: `Added ${newTasks.length} task(s) and ${newlyDiscoveredRequirements.length} requirement(s)`,
+        affectedRequirements: newlyDiscoveredRequirements.map((r) => r.id),
+        affectedTasks: newTasks.map((t) => t.id),
         approvalState: 'approved',
       });
     });

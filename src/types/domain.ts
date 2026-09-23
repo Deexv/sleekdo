@@ -233,6 +233,7 @@ export type EventType =
   | 'PROJECT_APPROVED'
   | 'PROJECT_BLOCKED'
   | 'HUMAN_OVERRIDE'
+  | 'AUTO_RETRY'
   | 'CRASH_RECOVERED';
 
 export interface SleekdoEvent {
