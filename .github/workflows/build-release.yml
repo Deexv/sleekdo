@@ -44,13 +44,12 @@ jobs:
       - name: Create tarball
         run: |
           mkdir -p dist
-          if command -v tar &> /dev/null; then
-            tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
-          else
-            echo "tar command not found, trying full path"
-            /usr/bin/tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
-          fi
-          sha256sum dist/${{ matrix.name }}.tar.gz > dist/${{ matrix.name }}.tar.gz.sha256
+          cd dist
+          tar -czf ../${{ matrix.name }}.tar.gz sleekdo
+          sha256sum ../${{ matrix.name }}.tar.gz > ../${{ matrix.name }}.tar.gz.sha256
+          cd ..
+          mv dist/${{ matrix.name }}.tar.gz dist/
+          mv dist/${{ matrix.name }}.tar.gz.sha256 dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
