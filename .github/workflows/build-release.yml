@@ -18,6 +18,9 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             name: sleekdo-linux-x64
+          - os: macos-latest
+            target: darwin-arm64
+            name: sleekdo-macos-arm64
 
     steps:
       - name: Checkout
