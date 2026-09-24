@@ -77,9 +77,10 @@ jobs:
         run: |
           cd dist
           for dir in */; do
-            if [ -d "$dir" ]; then
-              tar -czf "$dir.tar.gz" -C "$dir" .
-              sha256sum "$dir.tar.gz" > "$dir.tar.gz.sha256"
+            name="${dir%/}"
+            if [ -d "$name" ] && [[ "$name" != *"windows"* ]]; then
+              tar -czf "${name}.tar.gz" -C "$name" .
+              sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
             fi
           done
 
@@ -87,16 +88,26 @@ jobs:
         run: |
           cd dist
           for dir in */; do
-            if [ -d "$dir" ]; then
-              powershell Compress-Archive -Path "$dir" -DestinationPath "$dir.zip"
-              sha256sum "$dir.zip" > "$dir.zip.sha256"
+            name="${dir%/}"
+            if [ -d "$name" ] && [[ "$name" == *"windows"* ]]; then
+              if command -v zip &> /dev/null; then
+                (cd "$name" && zip -r "../${name}.zip" .)
+              else
+                python3 -m zipfile -c "${name}.zip" "$name"/*
+              fi
+              sha256sum "${name}.zip" > "${name}.zip.sha256"
             fi
           done
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: dist/**
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           generate_release_notes: true
+
