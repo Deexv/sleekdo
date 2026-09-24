@@ -18,9 +18,18 @@ jobs:
           - os: ubuntu-latest
             target: linux-x64
             name: sleekdo-linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+            name: sleekdo-linux-arm64
           - os: macos-latest
             target: darwin-arm64
             name: sleekdo-macos-arm64
+          - os: macos-latest
+            target: darwin-x64
+            name: sleekdo-macos-x64
+          - os: windows-latest
+            target: win-x64
+            name: sleekdo-windows-x64
 
     steps:
       - name: Checkout
@@ -41,22 +50,13 @@ jobs:
         run: |
           cp bin/sleekdo.js dist/sleekdo && chmod +x dist/sleekdo
 
-      - name: Create tarball
-        run: |
-          mkdir -p dist
-          cd dist
-          tar -czf ../${{ matrix.name }}.tar.gz sleekdo
-          sha256sum ../${{ matrix.name }}.tar.gz > ../${{ matrix.name }}.tar.gz.sha256
-          cd ..
-          mv dist/${{ matrix.name }}.tar.gz dist/
-          mv dist/${{ matrix.name }}.tar.gz.sha256 dist/
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: dist/*
           retention-days: 30
+          if-no-files-found: error
 
   release:
     needs: build
@@ -73,12 +73,23 @@ jobs:
         with:
           path: dist
 
-      - name: Generate checksums
+      - name: Create tarballs (Linux/macOS)
         run: |
           cd dist
-          for file in */*; do
-            if [[ -f "$file" ]]; then
-              sha256sum "$file" > "${file}.sha256"
+          for dir in */; do
+            if [ -d "$dir" ]; then
+              tar -czf "$dir.tar.gz" -C "$dir" .
+              sha256sum "$dir.tar.gz" > "$dir.tar.gz.sha256"
+            fi
+          done
+
+      - name: Create zip (Windows)
+        run: |
+          cd dist
+          for dir in */; do
+            if [ -d "$dir" ]; then
+              powershell Compress-Archive -Path "$dir" -DestinationPath "$dir.zip"
+              sha256sum "$dir.zip" > "$dir.zip.sha256"
             fi
           done
 
