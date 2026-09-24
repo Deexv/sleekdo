@@ -117,3 +117,36 @@ Sleekdo delegates tasks to three logical AI roles coordinated by an authoritativ
 
 - [`schemas.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/validation/schemas.ts). Enforces JSON schema contracts for plans, review verdicts, and investigations using Zod.
 - [`config.ts`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/config/config.ts). Validates and loads project configuration options and role overrides.
+
+### 8. Two-namespace input router subsystem
+
+- [`InputRouter`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/cli/input-router.ts). Deterministically routes `//` commands to Sleekdo authority handlers and passes `/` slash commands directly to the connected CLI harness without allowlist filtering. Generates live shell completions from metadata.
+
+### 9. Language Server Protocol (LSP) subsystem
+
+- [`LspManager`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/lsp/manager.ts). Manages multi-server discovery and client lifecycles for TypeScript, Python, Rust, Go, and JSON.
+- [`LspClient`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/lsp/client.ts). Handles JSON-RPC `Content-Length` framing, document synchronization, definitions, references, hover, and document symbols.
+- [`DiagnosticsLedger`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/lsp/diagnostics-ledger.ts). Collects and deduplicates diagnostic issues across files to provide verifiable compile-time evidence for A1 Worker and A3 Reviewer.
+
+### 10. Debug Adapter Protocol (DAP) subsystem
+
+- [`DapClient`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/dap/client.ts). Full DAP client transport supporting launch, attach, breakpoints, conditional breakpoints, stepping, stack frames, scopes, and variable evaluation.
+- [`DapSession`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/dap/session.ts). High-level session manager recording structured `DapRuntimeEvidence` for empirical hypothesis elimination.
+
+### 11. Hashline edit engine subsystem
+
+- [`HashlineEngine`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/hashline/engine.ts). Stale-edit resistant code patching engine using stable 4-hex SHA-256 line hashes.
+- [`SnapshotStore`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/hashline/snapshots.ts). Records historical line snapshots, normalizes line endings (CRLF to LF), preserves UTF-8 BOMs, and enforces multi-section atomic preflight validation.
+
+### 12. Developer tooling and search subsystem
+
+- [`globFiles`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/search/glob.ts). Fast filesystem globbing honoring `.gitignore` rules.
+- [`grepSearch`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/search/grep.ts). Line-based search with regex support and configurable leading/trailing context lines.
+- [`structuredRead`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/search/read.ts). Efficient line-range slicing and file outline extraction.
+- [`parseAstSymbols`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/search/ast-tool.ts). TypeScript AST analysis for symbol declarations.
+- [`PersistentProcessManager`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/tools/process/process-manager.ts). Manages long-running background tasks and dev servers with live event streaming and graceful cleanup.
+
+### 13. Blob storage subsystem
+
+- [`ContentAddressedBlobStore`](file:///C:/Users/ON%20GOD/Documents/code/SleekDo/src/storage/blob-store.ts). Stores large command and tool payloads outside core JSONL state files with SHA-256 deduplication and stable URIs.
+

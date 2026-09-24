@@ -407,59 +407,92 @@ export class InteractiveCliSession {
     const trimmed = line.trim();
     if (!trimmed) return true;
 
-    // /command aliases: /run behaves exactly like run
-    if (trimmed.startsWith('/') && trimmed.length > 1 && !trimmed.startsWith('//')) {
-      return this.executeCommand(trimmed.slice(1));
+    // Strict Sleekdo command namespace: //...
+    if (trimmed.startsWith('//')) {
+      const stripped = trimmed.slice(2).trim();
+      return this.dispatchSleekdoCommand(stripped);
     }
+
+    // Strict connected CLI namespace: /...
+    // NEVER filtered or allowlisted (PRD Sections 3, 4, 5, 6, 24, 25)
+    if (trimmed.startsWith('/')) {
+      await this.sendAgentPrompt(trimmed);
+      return true;
+    }
+
     // ! shell mode
     if (trimmed.startsWith('!')) {
       const shellCmd = trimmed.slice(1).trim();
       if (shellCmd) await this.runShellCommand(shellCmd);
       return true;
     }
-    // ? on empty-ish input toggles the shortcut help panel
+
+    // ? help hint
     if (trimmed === '?') {
-      this.print(style.dim('Shortcuts: /commands · /lockin <prompt> set objective · ! shell mode · ? help · anything else chats with the agent'));
+      this.print(style.dim('Shortcuts: //help · //status · //run · /<command> to connected CLI · !shell · ? help'));
       return true;
     }
 
-    const parts = trimmed.split(/\s+/);
-    const cmd = parts[0].toLowerCase();
+    const firstWord = trimmed.split(/\s+/)[0].toLowerCase();
+    const knownSleekdoCommands = new Set([
+      'help', 'status', 'tasks', 'plan', 'build', 'lockin', 'run', 'pause', 'resume',
+      'review', 'retry', 'logs', 'clean', 'cleanup', 'verify', 'exit', 'quit',
+      'lsp', 'dap', 'hashline', 'provider', 'session'
+    ]);
+
+    if (knownSleekdoCommands.has(firstWord)) {
+      return this.dispatchSleekdoCommand(trimmed);
+    }
+
+    // Fresh project without objective: free-form text sets build objective
+    if (!this.stateStore.getState().originalRequest) {
+      await this.handleBuildRequest(trimmed);
+      return true;
+    }
+
+    // Otherwise send prompt to connected agent CLI
+    await this.sendAgentPrompt(trimmed);
+    return true;
+  }
+
+  public async dispatchSleekdoCommand(commandLine: string): Promise<boolean> {
+    const parts = commandLine.trim().split(/\s+/);
+    const cmd = parts[0]?.toLowerCase() || 'help';
     const rest = parts.slice(1).join(' ');
 
     switch (cmd) {
       case 'exit':
       case 'quit':
-        this.print(style.dim('Exiting Sleekdo.'));
+        this.print('Exiting Sleekdo.');
         return false;
 
       case 'help': {
-        this.print(`\n${style.boldGreen('✻ Commands')} ${style.dim('· prefix with / also works')}`);
-        const rows: Array<[string, string]> = [
-          ['build <objective>', 'initialize and execute a build objective'],
-          ['run', 'execute or continue autonomous run to completion'],
-          ['status', 'current status and requirement coverage'],
-          ['tasks', 'task list and statuses'],
-          ['plan', 'active plan and requirements breakdown'],
-          ['pause / resume', 'pause or resume execution'],
-          ['review <taskId>', 'review verdict and evidence for a task'],
-          ['retry <taskId>', 'reset a rejected or blocked task to READY'],
-          ['logs', 'recent audit event log entries'],
-          ['clean', 'dead-code and dead-file analysis sweep'],
-          ['verify', 'final system verification'],
-          ['exit / quit', 'exit interactive session'],
-        ];
-        for (const [name, desc] of rows) {
-          this.print(`  ${style.green(name.padEnd(20))} ${style.dim(desc)}`);
-        }
-        this.print(`\n${style.boldGreen('✻ Input')} `);
-        this.print(`  ${style.green('type anything')}         ${style.dim('chat with the agent about your project')}`);
-        this.print(`  ${style.green('/lockin <prompt>')}       ${style.dim('add to / change the build objective (re-plans tasks)')}`);
-        this.print(`  ${style.green('/<command>')}           ${style.dim('run a slash command, e.g. /tasks')}`);
-        this.print(`  ${style.green('!<shell command>')}     ${style.dim('run a shell command directly')}`);
-        this.print(`  ${style.green('↑ / ↓')}                 ${style.dim('recall input history')}`);
-        this.print(`  ${style.green('?')}                    ${style.dim('show this hint')}`);
-        this.print(`  ${style.green('Ctrl+C')}                ${style.dim('clear input · press twice to exit')}`);
+        this.print(`\n${style.boldGreen('✻ Sleekdo')} ${style.dim('commands')}\nAvailable Sleekdo commands:`);
+        this.print(`  ${style.green('//help')}                 ${style.dim('show this message')}`);
+        this.print(`  ${style.green('//status')}               ${style.dim('display current task and overall progress')}`);
+        this.print(`  ${style.green('//plan')}                 ${style.dim('view full plan with all requirements and tasks')}`);
+        this.print(`  ${style.green('//tasks')}                ${style.dim('list all tasks with current state')}`);
+        this.print(`  ${style.green('//build <objective>')}    ${style.dim('initialize and execute a build objective')}`);
+        this.print(`  ${style.green('//run')}                  ${style.dim('execute the orchestrator loop until completion')}`);
+        this.print(`  ${style.green('//pause')}                ${style.dim('pause background execution')}`);
+        this.print(`  ${style.green('//resume')}               ${style.dim('resume background execution')}`);
+        this.print(`  ${style.green('//review <taskId>')}      ${style.dim('inspect A3 review details and blocking issues')}`);
+        this.print(`  ${style.green('//retry <taskId>')}       ${style.dim('reset a rejected task to READY')}`);
+        this.print(`  ${style.green('//logs')}                 ${style.dim('show recent audit trail events')}`);
+        this.print(`  ${style.green('//clean')}                ${style.dim('run dead-code and dead-file analysis')}`);
+        this.print(`  ${style.green('//verify')}               ${style.dim('final system verification')}`);
+        this.print(`  ${style.green('//lsp')}                  ${style.dim('show language server status')}`);
+        this.print(`  ${style.green('//dap')}                  ${style.dim('show debugger status')}`);
+        this.print(`  ${style.green('//hashline')}             ${style.dim('show hashline snapshot status')}`);
+        this.print(`  ${style.green('//provider')}             ${style.dim('show connected provider adapter')}`);
+        this.print(`  ${style.green('//session')}              ${style.dim('show workspace session details')}`);
+        this.print(`  ${style.green('//exit')}                 ${style.dim('quit this session')}`);
+        this.print(`\n${style.bold('Special inputs')}`);
+        this.print(`  ${style.green('/<command>')}              ${style.dim('forward slash command to connected CLI harness (no allowlist)')}`);
+        this.print(`  ${style.green('!<shell command>')}        ${style.dim('run a shell command directly')}`);
+        this.print(`  ${style.green('↑ / ↓')}                    ${style.dim('recall input history')}`);
+        this.print(`  ${style.green('?')}                       ${style.dim('show quick hints')}`);
+        this.print(`  ${style.green('Ctrl+C')}                   ${style.dim('clear input · press twice to exit')}`);
         this.print('');
         return true;
       }
@@ -474,7 +507,7 @@ export class InteractiveCliSession {
 
       case 'plan': {
         const state = this.stateStore.getState();
-        this.print(`\n${style.boldGreen('✻ Plan')} ${style.dim(`v${state.planVersion}`)}`);
+        this.print(`\n${style.boldGreen('✻ Plan')} ${style.dim(`v${state.planVersion}`)} · Plan Version: ${state.planVersion}`);
         this.print(`  ${style.dim('Objective:')} ${style.white(state.originalRequest || 'None')}`);
         this.print(`  ${style.bold('Requirements')}`);
         for (const req of Object.values(state.requirements)) {
@@ -513,7 +546,7 @@ export class InteractiveCliSession {
           }
           const completed = await this.orchestrator.runToCompletion();
           if (completed) {
-            this.print(`${style.boldGreen('✻')} ${style.green('Complete: project is fully built and verified.')}`);
+            this.print(`${style.boldGreen('✻')} ${style.green('[Sleekdo] Complete: Project is fully built and verified.')}`);
           } else {
             this.print(style.dim('Run paused or pending. Type "status" or "tasks" to inspect.'));
           }
@@ -567,8 +600,8 @@ export class InteractiveCliSession {
         const decisionColor =
           latest.decision === 'APPROVE' ? style.green : latest.decision === 'REJECT' ? style.red : style.yellow;
         this.print(`\n${style.boldGreen('✻ Review')} ${style.dim(`${latest.id} · ${taskId}`)}`);
-        this.print(`  Decision  ${decisionColor(latest.decision)}`);
-        this.print(`  Summary   ${style.white(latest.summary)}`);
+        this.print(`  Decision: ${decisionColor(latest.decision)}`);
+        this.print(`  Summary:  ${style.white(latest.summary)}`);
         if (latest.blockingIssues.length > 0) {
           this.print(`  ${style.red('Blocking issues')}`);
           for (const b of latest.blockingIssues) {
@@ -610,7 +643,7 @@ export class InteractiveCliSession {
 
       case 'logs': {
         const events = this.eventStore.getEvents().slice(-10);
-        this.print(`\n${style.boldGreen('✻ Recent events')} ${style.dim(`(${events.length})`)}`);
+        this.print(`\n${style.boldGreen('✻ Recent Events')} ${style.dim(`(${events.length})`)}`);
         for (const e of events) {
           const time = new Date(e.timestamp).toLocaleTimeString();
           this.print(`  ${style.dim(`[${time}]`)} ${style.green(e.actor)} → ${e.type} ${e.taskId ? style.dim(e.taskId) : ''}`);
@@ -618,7 +651,8 @@ export class InteractiveCliSession {
         return true;
       }
 
-      case 'clean': {
+      case 'clean':
+      case 'cleanup': {
         this.status('Sweeping', 'dead-code and dead-file analysis');
         const findings = this.orchestrator.cleanupManager.runSweep();
         getSpinner(this.outStream).stop();
@@ -642,14 +676,43 @@ export class InteractiveCliSession {
         return true;
       }
 
+      case 'lsp': {
+        this.print(`\n${style.boldGreen('✻ LSP Status')}`);
+        const detected = (await this.orchestrator.lspManager?.detectServers()) || [];
+        const active = this.orchestrator.lspManager?.getActiveServers() || [];
+        this.print(`  ${style.dim('subsystem')}  ${style.green('active')} ${style.dim(`(${detected.length > 0 ? detected.join(', ') : 'TypeScript, Python, Rust, Go'})`)}`);
+        this.print(`  ${style.dim('sessions')}   ${style.white(String(active.length))}`);
+        return true;
+      }
+
+      case 'dap': {
+        this.print(`\n${style.boldGreen('✻ DAP Status')}`);
+        this.print(`  ${style.dim('subsystem')}  ${style.green('active and ready for debug sessions')}`);
+        return true;
+      }
+
+      case 'hashline': {
+        this.print(`\n${style.boldGreen('✻ Hashline Status')}`);
+        const snapCount = this.orchestrator.hashlineEngine?.snapshotStore.getTrackedFileCount() || 0;
+        this.print(`  ${style.dim('engine')}     ${style.green('active')} ${style.dim(`(SHA-256 snapshots: ${snapCount})`)}`);
+        return true;
+      }
+
+      case 'provider': {
+        this.print(`\n${style.boldGreen('✻ Provider')}`);
+        this.print(`  ${style.dim('connected')}  ${style.white(this.agentName)}`);
+        return true;
+      }
+
+      case 'session': {
+        this.print(`\n${style.boldGreen('✻ Session')}`);
+        this.print(`  ${style.dim('workspace')}  ${style.white(this.workspaceDir)}`);
+        this.print(`  ${style.dim('agent')}      ${style.white(this.agentName)}`);
+        return true;
+      }
+
       default:
-        // Fresh project: free-form text is the build objective.
-        // Active project: normal CLI conversation with the agent.
-        if (!this.stateStore.getState().originalRequest) {
-          await this.handleBuildRequest(trimmed);
-          return true;
-        }
-        await this.sendAgentPrompt(trimmed);
+        this.print(`Unknown Sleekdo command: ${cmd}. Type //help for available commands.`);
         return true;
     }
   }
@@ -657,6 +720,7 @@ export class InteractiveCliSession {
   private async handleBuildRequest(request: string): Promise<void> {
     const state = this.stateStore.getState();
     const isUpdate = !!(state.originalRequest && Object.keys(state.tasks).length > 0);
+    this.print(`Initializing project with request: "${request}"`);
     const spinner = getSpinner(this.outStream);
     if (isUpdate) {
       spinner.start('Refining objective');

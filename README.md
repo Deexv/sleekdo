@@ -6,132 +6,78 @@
 
 **Sleekdo is an agent orchestration and verification system for autonomous software development.** It enables coding CLI agents to build, modify, debug, test, refactor, and complete software projects of arbitrary size and domain.
 
-## Features
+## Two-Namespace Command Architecture
 
-- **Batch-review model** — Tasks are executed first, then reviewed in a single end-of-run batch with synthetic per-task reviews
-- **Command cache** — Memoizes tool-call results to reduce redundant operations and improve performance
-- **Live agent streaming** — Tool calls, markdown-formatted narration, and idle loaders in real-time
-- **Progress tracking** — Executed-but-unreviewed tasks count toward progress so the bar reflects real work
-- **Design/anti-AI-slop review** — Explicit checks for emoji-stuffed headers, lorem ipsum, generic gradients
-- **Raw-mode input** — Claude Code-style always-closed input box with history and tab completion
-- **Zero-repository-clone installer** — Install with a single command without cloning the repository
+Sleekdo enforces a deterministic two-namespace interaction model:
 
-## Installation
-
-### Quick Install (Recommended)
-
-```bash
-npm install -g sleekdo
+```text
+//<command>     -> Sleekdo authority commands
+/<command>      -> Connected CLI harness (passed through without allowlists)
+<prompt>        -> Connected CLI harness (or project objective initialization)
+!<shell>        -> Local shell execution
 ```
 
-### Alternative: Zero-Repository-Clone Installer
+- **`//` Namespace (Sleekdo)**: Reserved exclusively for Sleekdo orchestration, task status, inspection, and verification gates.
+- **`/` Namespace (Connected CLI)**: Passed through directly to the connected coding agent harness (Pi, Claude Code, Antigravity). Commands are **never restricted by a hard-coded allowlist**. If a provider adds `/new-feature`, it works immediately in Sleekdo.
 
-```bash
-curl -fsSL https://github.com/Deexv/sleekdo/raw/main/install.sh | sh
-```
-
-This installer automatically detects your OS and architecture (Linux x64, Linux arm64, macOS arm64, macOS x64, Windows x64), downloads the appropriate binary from GitHub Releases, and adds it to your PATH.
-
-### Linux Installation
-
-```bash
-# Using npm
-npm install -g sleekdo
-
-# Or using curl
-curl -fsSL https://github.com/Deexv/sleekdo/raw/main/install.sh | sh
-
-# Verify installation
-sleekdo --help
-```
-
-### macOS Installation
-
-```bash
-# Using npm
-npm install -g sleekdo
-
-# Or using curl
-curl -fsSL https://github.com/Deexv/sleekdo/raw/main/install.sh | sh
-
-# Verify installation
-sleekdo --help
-```
-
-### Windows Installation
-
-```powershell
-# Using npm
-npm install -g sleekdo
-
-# Or using PowerShell
-Invoke-WebRequest -Uri "https://github.com/Deexv/sleekdo/raw/main/install.ps1" -OutFile "install.ps1"
-.\install.ps1
-```
-
-## Usage
-
-### Start the Interactive Terminal
-
-```bash
-# With Pi CLI backend (recommended)
-sleekdo --pi
-
-# With Claude Code backend
-sleekdo --claude
-
-# With Google Antigravity (Agy) backend
-sleekdo --agy
-```
-
-### Enter Your Objective
-
-Type what you want to build when prompted:
-
-```
-> Create a complete REST API with authentication, SQLite storage, tests, and rate limiting.
-```
-
-Sleekdo plans the work, validates the plan with A3 Reviewer, and displays the task roadmap.
-
-### Interactive Commands
-
-Inside the interactive prompt (`sleekdo>`), use these commands:
+### Available Sleekdo Authority Commands (`//`)
 
 | Command | Action |
 |---------|--------|
-| `run` | Starts the autonomous implementation and verification cycle |
-| `status` | Displays live status, task counts, requirement progress, and blocked tasks |
-| `tasks` | Displays the task tree with status symbols (`✓` approved, `→` in progress, `○` ready/pending, `✗` rejected/blocked) |
-| `plan` | Prints the current plan version, original objective, and requirement breakdown |
-| `review <taskId>` | Shows the A3 review verdict and evidence for a specific task |
-| `retry <taskId>` | Resets a rejected or blocked task to `READY` state |
-| `pause` | Gracefully pauses execution after current task boundary |
-| `resume` | Resumes paused execution |
-| `logs` | Displays recent audit events |
-| `clean` | Runs dead-code, dead-file, and dependency analysis |
-| `verify` | Runs final 13-criteria system verification |
-| `/lockin` | Lock in the current objective and skip A3 plan review for faster refinement |
-| `/lockin <objective>` | Update the objective and skip A3 plan review |
-| `exit` or `quit` | Closes the interactive session |
+| `//run` | Executes autonomous implementation and verification cycle to completion |
+| `//status` | Displays live status, task counts, requirement progress, and blocked tasks |
+| `//tasks` | Displays the task tree with status symbols (`✓` approved, `→` in progress, `○` ready/pending, `✗` rejected/blocked) |
+| `//plan` | Prints the active plan version, original objective, and requirement breakdown |
+| `//review <taskId>` | Shows the A3 independent review verdict and evidence for a specific task |
+| `//retry <taskId>` | Resets a rejected or blocked task to `READY` state |
+| `//pause` | Gracefully pauses execution after current task boundary |
+| `//resume` | Resumes paused execution |
+| `//logs` | Displays recent audit events from the immutable event store |
+| `//clean` | Runs dead-code, dead-file, and unused dependency analysis sweeps |
+| `//verify` | Runs full multi-criteria system verification against all requirements |
+| `//lsp [status\|diag]` | Inspects Language Server Protocol status and active diagnostics |
+| `//dap [status]` | Inspects Debug Adapter Protocol debugging sessions and breakpoints |
+| `//hashline [status]` | Inspects Hashline edit engine status and active snapshots |
+| `//provider` | Displays connected provider details and session capabilities |
+| `//session` | Displays workspace directory, state revision, and artifact storage |
+| `//exit` or `//quit` | Closes the interactive session |
 
-### Batch Mode Workflow
+*Note: In interactive mode, typing bare commands such as `status`, `plan`, `run`, or `help` also executes the corresponding Sleekdo command for convenience.*
 
-For headless scripting:
+## Advanced Developer Tooling
 
-```bash
-# Initialize project with your prompt
-sleekdo init "Create a high-performance REST API with authentication"
+Sleekdo integrates developer tooling adapted from the proven techniques of **Oh My Pi**:
 
-# Run the orchestrator loop to completion
-sleekdo run
+### 1. Language Server Protocol (LSP)
+- **JSON-RPC Framing**: Robust content-length header framing supporting streaming and chunked responses.
+- **Multi-Server Detection**: Auto-detects and launches language servers for TypeScript/JavaScript (`typescript-language-server`), Python (`pyright`, `pylsp`), Rust (`rust-analyzer`), Go (`gopls`), and JSON.
+- **Diagnostics Ledger**: Deduplicates and tracks diagnostic reports across files to provide verifiable compile-time evidence for A1 Worker implementation and A3 Reviewer verification.
 
-# Inspect live progress and requirement coverage
-sleekdo status
+### 2. Debug Adapter Protocol (DAP)
+- **Real Debugger Transport**: Full DAP client supporting launch, attach, breakpoints, conditional breakpoints, stepping, stack traces, variable scopes, and expression evaluation.
+- **Evidence-Driven Debugging**: Captures runtime stack frames and variables as structured `DapRuntimeEvidence`, replacing guesswork with empirical hypothesis elimination.
 
-# Run system verification
-sleekdo verify
-```
+### 3. Hashline Edit Engine
+- **Stale-Edit Protection**: Computes stable 4-hex SHA-256 hashes per line; automatically rejects stale edits if the target file has diverged.
+- **Atomic Preflight**: Validates all sections in a multi-part patch before writing to disk, preventing partial or corrupted file state.
+- **Encoding & Line Ending Normalization**: Seamlessly handles CRLF line endings and UTF-8 Byte Order Marks (BOM).
+
+### 4. Search, Code Intelligence & Runtime Tools
+- **Structured Search**: Fast file globbing respecting `.gitignore`, grep search with configurable context lines, and structured range reads with outline views.
+- **AST Code Intelligence**: Parses TypeScript ASTs to extract function signatures and class definitions.
+- **Persistent Process Manager**: Manages long-lived background tasks and dev servers with output streaming and graceful termination.
+- **Content-Addressed Blob Storage**: Deduplicates and externalizes large command outputs and tool payloads outside core state JSONL files.
+
+## Features
+
+- **Authoritative A1/A2/A3 Model** — A1 Worker implements, A2 Planner decomposes and reassesses, A3 independently verifies with fresh sessions
+- **Strict Two-Namespace Router** — `//` for Sleekdo authority, `/` for open connected CLI commands
+- **Batch-review model** — Tasks are executed, then reviewed in an end-of-run batch with individual synthetic reviews
+- **Command cache** — Memoizes tool-call results to reduce redundant operations
+- **Live agent streaming** — Tool calls, markdown-formatted narration, and idle loaders in real-time
+- **Workspace isolation** — Worker agents are strictly barred from modifying Sleekdo control files (`.sleekdo/`)
+- **Self-healing crash recovery** — Recovers interrupted tasks and heals stale locks from dead process IDs
+- **Zero-repository-clone installer** — Install with a single command without cloning the repository
 
 ## Architecture
 
@@ -187,6 +133,10 @@ Contributions are welcome! Please read our contributing guidelines and submit pu
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+### Third-Party Notices & Attribution
+
+Developer tooling mechanisms, including LSP framing, DAP debugging structures, and Hashline snapshot logic, are adapted under the MIT License from [Oh My Pi](https://github.com/can1357/oh-my-pi) by Mario Zechner, Can Bölük, and Stencil Labs. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for full attribution.
 
 ## Author
 

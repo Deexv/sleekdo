@@ -21,6 +21,9 @@ import { TeeAdapter } from '../adapters/tee-adapter.js';
 import { A1Worker } from '../roles/a1-worker.js';
 import { A2Planner } from '../roles/a2-planner.js';
 import { A3Reviewer } from '../roles/a3-reviewer.js';
+import { LspManager } from '../tools/lsp/manager.js';
+import { HashlineEngine } from '../tools/hashline/engine.js';
+import { ContentAddressedBlobStore } from '../storage/blob-store.js';
 import { Task, TaskId, TaskStatus, ReviewResult, SleekdoState, RequirementId, TaskRejection } from '../types/domain.js';
 
 export interface OrchestratorProgressEvent {
@@ -78,6 +81,9 @@ export class Orchestrator {
   public readonly cleanupManager: CleanupManager;
   public readonly reviewContextBuilder: ReviewContextBuilder;
   public readonly finalVerifier: FinalVerifier;
+  public readonly blobStore: ContentAddressedBlobStore;
+  public readonly lspManager: LspManager;
+  public readonly hashlineEngine: HashlineEngine;
 
   public readonly worker: A1Worker;
   public readonly planner: A2Planner;
@@ -115,6 +121,9 @@ export class Orchestrator {
     this.reviewContextBuilder = new ReviewContextBuilder(this.fsEngine);
     this.finalVerifier = new FinalVerifier(this.stateStore, this.reqMatrix, this.testEngine, this.deadCodeAnalyzer);
     this.crashRecovery = new CrashRecovery(this.stateStore, this.eventStore, this.lock, this.snapshotEngine);
+    this.blobStore = new ContentAddressedBlobStore(path.join(this.workspaceDir, '.sleekdo', 'blobs'));
+    this.lspManager = new LspManager(this.workspaceDir);
+    this.hashlineEngine = new HashlineEngine(this.workspaceDir);
 
     const workerAdapter = options.workerAdapter;
     const plannerAdapter = options.plannerAdapter || options.workerAdapter;
@@ -689,7 +698,7 @@ export class Orchestrator {
         this.artifactStore.saveReview(syntheticReview);
         this.handleTaskApproval(t.id, syntheticReview);
       } else {
-        const issues = verdict.blockingIssues.filter((b) => b.taskId === t.id);
+        const issues = verdict.blockingIssues.filter((b) => !b.taskId || b.taskId === t.id);
         const rejectionReview: ReviewResult = {
           id: `rev_batch_${Date.now()}_${t.id}`,
           taskId: t.id,
@@ -708,13 +717,24 @@ export class Orchestrator {
           noRegressions: true,
           scopeControlled: true,
           noDeadCodeIntroduced: true,
-          blockingIssues: issues.map((i) => ({
-            description: i.description,
-            evidence: 'End-of-run batch review',
-            affectedRequirement: t.requirements[0] || 'Batch review',
-            requiredFix: i.requiredFix,
-            verification: 'Task must pass batch review criteria on retry',
-          })),
+          blockingIssues:
+            issues.length > 0
+              ? issues.map((i) => ({
+                  description: i.description,
+                  evidence: i.evidence || 'End-of-run batch review',
+                  affectedRequirement: i.affectedRequirement || t.requirements[0] || 'Batch review',
+                  requiredFix: i.requiredFix,
+                  verification: i.verification || 'Task must pass batch review criteria on retry',
+                }))
+              : [
+                  {
+                    description: verdict.summary || 'Rejected in batch review',
+                    evidence: 'End-of-run batch review',
+                    affectedRequirement: t.requirements[0] || 'Batch review',
+                    requiredFix: 'See batch review feedback',
+                    verification: 'Task must pass batch review criteria on retry',
+                  },
+                ],
         };
         this.artifactStore.saveReview(rejectionReview);
         this.handleTaskRejection(t.id, rejectionReview);

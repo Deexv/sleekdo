@@ -57,5 +57,5 @@ export const glyphs = {
   pointer: '›', // list item
 };
 
-/* Spinner frames — animated while the orchestrator works */
-export const spinnerFrames = ['✻', '✽', '✶', '✳', '✻', '✽', '✶', '✳'];
+/* Spinner frames — animated while the orchestrator works (pulsing larger) */
+export const spinnerFrames = ['✻', '✽', '✸', '✹', '✸', '✽'];

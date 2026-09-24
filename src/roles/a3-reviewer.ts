@@ -203,7 +203,14 @@ export class A3Reviewer {
     approved: boolean;
     rejectedTaskIds: string[];
     summary: string;
-    blockingIssues: Array<{ taskId: string; description: string; requiredFix: string }>;
+    blockingIssues: Array<{
+      taskId: string;
+      description: string;
+      evidence?: string;
+      affectedRequirement?: string;
+      requiredFix: string;
+      verification?: string;
+    }>;
   }> {
     const startedAt = Date.now();
     const taskIds = new Set(payload.tasks.map((t) => t.id));
@@ -332,31 +339,67 @@ export class A3Reviewer {
     approved: boolean;
     rejectedTaskIds: string[];
     summary: string;
-    blockingIssues: Array<{ taskId: string; description: string; requiredFix: string }>;
+    blockingIssues: Array<{
+      taskId: string;
+      description: string;
+      evidence?: string;
+      affectedRequirement?: string;
+      requiredFix: string;
+      verification?: string;
+    }>;
   } | null {
     const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
     if (!match) return null;
     try {
       const obj = JSON.parse(match[1] || match[0]);
-      if (typeof obj.approved !== 'boolean') return null;
-      if (!Array.isArray(obj.rejectedTaskIds)) return null;
-      const rejectedTaskIds = (obj.rejectedTaskIds as unknown[]).filter(
+      let approved: boolean | undefined;
+      if (typeof obj.approved === 'boolean') {
+        approved = obj.approved;
+      } else if (obj.decision === 'APPROVE') {
+        approved = true;
+      } else if (obj.decision === 'REJECT' || obj.decision === 'BLOCK') {
+        approved = false;
+      }
+
+      if (approved === undefined) return null;
+
+      let rawRejected: unknown[] = [];
+      if (Array.isArray(obj.rejectedTaskIds)) {
+        rawRejected = obj.rejectedTaskIds;
+      } else if (!approved) {
+        if (obj.taskId && typeof obj.taskId === 'string') {
+          rawRejected = [obj.taskId];
+        } else {
+          rawRejected = [...validTaskIds];
+        }
+      }
+
+      const rejectedTaskIds = rawRejected.filter(
         (id): id is string => typeof id === 'string' && validTaskIds.has(id)
       );
+
       const blockingIssues = Array.isArray(obj.blockingIssues)
         ? (obj.blockingIssues as unknown[])
             .filter(
-              (b): b is { taskId: string; description: string; requiredFix: string } =>
+              (b): b is Record<string, unknown> =>
                 !!b && typeof b === 'object' && typeof (b as any).description === 'string'
             )
             .map((b) => ({
-              taskId: typeof (b as any).taskId === 'string' && validTaskIds.has((b as any).taskId) ? (b as any).taskId : '',
-              description: (b as any).description,
-              requiredFix: typeof (b as any).requiredFix === 'string' ? (b as any).requiredFix : 'See review summary',
+              taskId:
+                typeof b.taskId === 'string' && validTaskIds.has(b.taskId)
+                  ? b.taskId
+                  : validTaskIds.size === 1
+                  ? [...validTaskIds][0]
+                  : '',
+              description: String(b.description),
+              evidence: typeof b.evidence === 'string' ? b.evidence : 'A3 Review',
+              affectedRequirement: typeof b.affectedRequirement === 'string' ? b.affectedRequirement : '',
+              requiredFix: typeof b.requiredFix === 'string' ? b.requiredFix : 'See review summary',
+              verification: typeof b.verification === 'string' ? b.verification : 'Verify fix',
             }))
         : [];
       return {
-        approved: obj.approved && rejectedTaskIds.length === 0,
+        approved: approved && rejectedTaskIds.length === 0,
         rejectedTaskIds,
         summary: typeof obj.summary === 'string' ? obj.summary : 'Batch review completed',
         blockingIssues,

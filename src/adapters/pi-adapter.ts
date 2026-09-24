@@ -91,7 +91,11 @@ export class PiAdapter implements AgentAdapter {
       args.push('--model', session.config.model);
     }
     if (session.config.tools && session.config.tools.length > 0) {
-      args.push('--tools', session.config.tools.join(','));
+      const piSupportedTools = new Set(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']);
+      const validTools = session.config.tools.filter((t) => piSupportedTools.has(t));
+      if (validTools.length > 0) {
+        args.push('--tools', validTools.join(','));
+      }
     }
     if (session.config.systemPrompt) {
       args.push('--system-prompt', session.config.systemPrompt);

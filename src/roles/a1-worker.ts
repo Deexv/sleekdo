@@ -31,7 +31,7 @@ export class A1Worker {
       workspaceDir: this.workspaceDir,
       role: 'A1',
       systemPrompt: this.promptTemplate,
-      tools: ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'],
+      tools: ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls', 'hashline', 'lsp', 'dap', 'glob', 'ast'],
       ephemeralSession: true,
     });
 

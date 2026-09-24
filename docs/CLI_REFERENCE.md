@@ -26,27 +26,48 @@ sleekdo --provider <pi|agy|claude|mock>
 sleekdo
 ```
 
-### Interactive terminal commands
+### Two-namespace command routing (Sections 3, 4, 5, 6, 24, 25)
 
-Inside the Sleekdo interactive prompt (`sleekdo>`), the following commands are available:
+Sleekdo enforces a strict two-namespace architecture:
 
-- `build <objective>`. Initializes project planning with the specified objective.
-- `run`. Executes or continues the autonomous development cycle until completion.
-- `status`. Displays live status, task counts, requirement progress, and active locks.
-- `tasks`. Displays the task tree with status symbols (`✓` approved, `→` in progress, `○` ready/pending, `✗` rejected/blocked).
-- `plan`. Prints the current plan version, original objective, and requirement breakdown.
-- `pause`. Gracefully pauses the execution loop.
-- `resume`. Resumes paused execution.
-- `review <taskId>`. Inspects the A3 independent review verdict, evidence, and blocking issues for a task.
-- `retry <taskId>`. Resets a rejected or blocked task to `READY` state.
-- `logs`. Displays recent audit events from the event store.
-- `clean`. Runs dead-code, dead-file, and dependency analysis.
-- `verify`. Runs final 13-criteria system verification.
-- `exit` or `quit`. Closes the interactive session.
-- `/lockin`. Lock in the current objective and skip the A3 plan review for faster refinement.
-- `/lockin <objective>`. Update the objective and skip the A3 plan review.
-- `/lockin <objective> --continue`. Update the objective, skip A3 review, and continue running.
-- `/lockin <objective> --continue --resume`. Update the objective, skip A3 review, resume from paused state.
+- `//...` routes exclusively to Sleekdo authority commands.
+- `/<command>` routes directly to the connected CLI harness (Pi, Claude Code, Antigravity) without any hard-coded allowlist.
+- `<prompt>` routes directly to the connected agent harness (or initializes objective on a fresh workspace).
+- `!<shell>` executes local shell commands directly.
+
+### Sleekdo authority commands (`//`)
+
+Inside the Sleekdo interactive prompt (`sleekdo>`), the following authority commands are available:
+
+- `//build <objective>`. Initializes project planning with the specified objective.
+- `//run`. Executes or continues the autonomous development cycle until completion.
+- `//status`. Displays live status, task counts, requirement progress, and active locks.
+- `//tasks`. Displays the task tree with status symbols (`✓` approved, `→` in progress, `○` ready/pending, `✗` rejected/blocked).
+- `//plan`. Prints the current plan version, original objective, and requirement breakdown.
+- `//pause`. Gracefully pauses the execution loop.
+- `//resume`. Resumes paused execution.
+- `//review <taskId>`. Inspects the A3 independent review verdict, evidence, and blocking issues for a task.
+- `//retry <taskId>`. Resets a rejected or blocked task to `READY` state.
+- `//logs`. Displays recent audit events from the immutable event store.
+- `//clean`. Runs dead-code, dead-file, and unused dependency sweeps.
+- `//verify`. Runs final multi-criteria system verification.
+- `//lsp [status|diag]`. Inspects Language Server Protocol status and active diagnostic ledger.
+- `//dap [status]`. Inspects Debug Adapter Protocol debugging sessions and active breakpoints.
+- `//hashline [status]`. Inspects Hashline edit engine status and SHA-256 snapshots.
+- `//provider`. Displays connected provider adapter and capability details.
+- `//session`. Displays active workspace directory, state revision, and artifact storage.
+- `//exit` or `//quit`. Closes the interactive session.
+
+*Note: In interactive mode, typing bare commands such as `status`, `plan`, `run`, or `help` also executes the corresponding Sleekdo command for convenience.*
+
+### Connected CLI commands (`/`)
+
+Any command starting with a single `/` is forwarded directly to the connected CLI backend without filtering or allowlists:
+
+- `/help`. Invokes provider-native help.
+- `/model <name>`. Switches model inside the connected provider.
+- `/compact`. Triggers provider context compaction if supported.
+- `/<any-new-command>`. Completely open for any existing or future provider commands.
 
 ## Batch subcommands
 
