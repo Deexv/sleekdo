@@ -44,7 +44,7 @@ jobs:
       - name: Create tarball
         run: |
           mkdir -p dist
-          tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
+          /usr/bin/tar -czf dist/${{ matrix.name }}.tar.gz -C dist sleekdo
           sha256sum dist/${{ matrix.name }}.tar.gz > dist/${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
